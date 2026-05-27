@@ -1,0 +1,25 @@
+[package]
+name = "maiscope-viewer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.18.1", default-features = false, features = [
+    "bevy_asset",          # Required to load your charts and audio
+    "bevy_winit",          # Required for window creation
+    "bevy_core_pipeline",  # Required for basic rendering
+    "bevy_render",         # The core rendering framework
+    "bevy_sprite",         # Required for 2D rendering and cameras
+    "x11",                 # (Optional) Include if testing on Linux
+    "wayland",           # (Optional) Include if testing on Linux
+] }
+
+bevy_kira_audio = { version = "0.25.0", default-features = false, features = ["mp3", "wav", "ogg"] }
+bevy_prototype_lyon = "0.16.0"
+
+[profile.release]
+opt-level = 'z'     # Optimize for size ('s' is also an option, 'z' is usually smaller)
+lto = true          # Enable Link Time Optimization (drops dead code across crates)
+codegen-units = 1   # Maximize optimization at the cost of slower compile times
+strip = true        # Strip symbols from the binary (huge size reduction)
+panic = 'abort'     # Remove stack-unwinding code (saves space, but you lose tracebacks on panics)
