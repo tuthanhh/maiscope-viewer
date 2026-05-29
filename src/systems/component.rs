@@ -1,3 +1,6 @@
+use bevy::prelude::Component;
+
+// The components used by the whole viewer system.
 pub type ButtonId = usize;
 pub type Divider = usize;
 pub type Count = usize;
@@ -39,7 +42,7 @@ pub struct SlideSegment {
     pub is_break: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Component)]
 pub enum NoteKind {
     Tap(ButtonId),
     TapHold {
