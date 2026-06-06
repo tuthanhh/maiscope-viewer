@@ -1,4 +1,4 @@
-use super::component::{ChartEvent, Note, NoteKind, TimedEvent};
+use super::component::{ChartEvent, TimedEvent};
 use super::{DEFAULT_BPM, GROWING, MOVING};
 use bevy::prelude::*;
 
@@ -22,49 +22,8 @@ pub struct ChartPlayback {
 
 impl Default for ChartPlayback {
     fn default() -> Self {
-        // Test chart: one tap per button (0–7), each 1 second apart at 120 BPM.
-        let mut timed_events: Vec<TimedEvent> = (0..8)
-            .map(|i| TimedEvent {
-                time: i as f64,
-                bpm: 120.0,
-                event: ChartEvent::NoteGroup(vec![
-                    Note {
-                        is_break: false,
-                        is_firework: false,
-                        is_ex: false,
-                        kind: NoteKind::Tap(i),
-                    },
-                    Note {
-                        is_break: false,
-                        is_firework: false,
-                        is_ex: false,
-                        kind: NoteKind::Touch {
-                            value: i,
-                            group: 'A',
-                        },
-                    },
-                ]),
-            })
-            .collect();
-
-        timed_events.push(TimedEvent {
-            time: 9 as f64,
-            bpm: 120.0,
-            event: ChartEvent::NoteGroup(vec![Note {
-                is_break: false,
-                is_firework: false,
-                is_ex: false,
-                kind: NoteKind::TouchHold {
-                    value: 0,
-                    group: 'C',
-                    divider: 8,
-                    count: 16,
-                },
-            }]),
-        });
-
         Self {
-            timed_events,
+            timed_events: Vec::new(),
             next_spawn_index: 0,
             note_speed: 7.0,
             chart_speed: 0.25,
@@ -145,15 +104,5 @@ impl ChartPlayback {
         } else {
             None
         }
-    }
-
-    /// Unconditionally steps to the next event, snapping `elapsed_time` to it.
-    /// Intended for scrubbing, editor previews, or step-through debugging —
-    /// not for frame-driven playback.
-    pub fn step(&mut self) -> Option<TimedEvent> {
-        let event = self.timed_events.get(self.next_spawn_index)?;
-        self.elapsed_time = event.time;
-        self.next_spawn_index += 1;
-        Some(event.clone())
     }
 }

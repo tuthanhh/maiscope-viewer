@@ -1,12 +1,16 @@
 use super::{
     NOTE_RADIUS,
-    component::{HoldNoteElement, NoteTiming, TouchElement, TouchHoldCountdown},
+    component::{
+        HoldNoteElement, NoteBpm, NoteTiming, SlideArrow, SlideElement, TouchElement,
+        TouchHoldCountdown,
+    },
     note_colors,
     resources::{ButtonLayout, NoteAssets},
     shapes::{
-        hold_arch_shape, hold_body_shape, tap_shape, touch_circle_shape, touch_hold_triangle_shape,
-        touch_triangle_shape,
+        chevron_shape, hold_arch_shape, hold_body_shape, star_shape, tap_shape, touch_circle_shape,
+        touch_hold_triangle_shape, touch_triangle_shape,
     },
+    slide_path,
 };
 use crate::systems::{
     GROWING,
@@ -89,6 +93,7 @@ fn spawn_note(
     let mut e = commands.spawn((
         note.kind.clone(),
         NoteTiming::Growing(Timer::from_seconds(growing_time, TimerMode::Once)),
+        NoteBpm(bpm),
     ));
 
     match &note.kind {
@@ -102,9 +107,13 @@ fn spawn_note(
 
         NoteKind::TapHold { button, .. } => {
             let pos = tap_pos(*button, layout) * super::RADIUS;
+            let dir = layout.tap[*button - 1];
+            let angle = dir.y.atan2(dir.x) - FRAC_PI_2;
             e.insert((
                 Visibility::default(),
-                Transform::from_translation(pos.extend(2.0)).with_scale(Vec3::ZERO),
+                Transform::from_translation(pos.extend(2.0))
+                    .with_rotation(Quat::from_rotation_z(angle))
+                    .with_scale(Vec3::ZERO),
             ));
             e.with_children(|p| spawn_hold_children(p, assets, tap_color(is_paired)));
         }
@@ -134,8 +143,43 @@ fn spawn_note(
             });
         }
 
-        NoteKind::SlideStar(_) | NoteKind::HeadlessSlide { .. } | NoteKind::Slide { .. } => {
-            unimplemented!("slide spawning")
+        // Standalone star (no path): behaves like a tap, parent carries the star.
+        NoteKind::SlideStar(button) => {
+            let pos = tap_pos(*button, layout) * super::RADIUS;
+            e.insert((
+                star_shape(assets, slide_color(is_paired)),
+                Transform::from_translation(pos.extend(2.0)).with_scale(Vec3::ZERO),
+            ));
+        }
+
+        // Slide / HeadlessSlide: parent is an origin container; head star, trace
+        // star, and chevrons live as children at absolute world positions.
+        NoteKind::Slide {
+            head_button,
+            segments,
+            shared_duration,
+        }
+        | NoteKind::HeadlessSlide {
+            start_button: head_button,
+            segments,
+            shared_duration,
+        } => {
+            let path = slide_path::build_slide_trace(
+                segments,
+                *head_button,
+                bpm,
+                *shared_duration,
+                super::RADIUS,
+            );
+            let has_head = matches!(note.kind, NoteKind::Slide { .. });
+            let color = slide_color(is_paired);
+            let head = *head_button;
+
+            e.insert((Transform::default(), Visibility::Visible));
+            e.with_children(|p| {
+                spawn_slide_children(p, &path, has_head, head, layout, assets, color);
+            });
+            e.insert(path);
         }
     }
 }
@@ -143,16 +187,16 @@ fn spawn_note(
 // ── Transform helpers ──────────────────────────────────────────────────────
 
 fn tap_pos(value: usize, layout: &ButtonLayout) -> Vec2 {
-    layout.tap_spawn[value]
+    layout.tap_spawn[value - 1]
 }
 
 fn touch_pos(value: usize, group: char, layout: &ButtonLayout) -> Vec2 {
     match group.to_ascii_uppercase() {
-        'C' => layout.c[value],
-        'B' => layout.b[value],
-        'A' => layout.a[value],
-        'D' => layout.d[value],
-        'E' => layout.e[value],
+        'C' => layout.c[value - 1],
+        'B' => layout.b[value - 1],
+        'A' => layout.a[value - 1],
+        'D' => layout.d[value - 1],
+        'E' => layout.e[value - 1],
         _ => Vec2::ZERO,
     }
 }
@@ -221,5 +265,54 @@ fn spawn_approach_triangles(
                 TouchElement::Triangle,
             ));
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_slide_children(
+    parent: &mut RelatedSpawnerCommands<ChildOf>,
+    path: &super::component::SlidePath,
+    has_head: bool,
+    head_button: usize,
+    layout: &ButtonLayout,
+    assets: &NoteAssets,
+    color: Color,
+) {
+    // Head star (Slide only): spawns at the head button, scale ZERO so it grows
+    // during the Growing phase, then approaches the ring during Moving.
+    if has_head {
+        let pos = layout.tap_spawn[head_button - 1] * super::RADIUS;
+        parent.spawn((
+            star_shape(assets, color),
+            Transform::from_translation(pos.extend(2.0)).with_scale(Vec3::ZERO),
+            SlideElement::Head,
+        ));
+    }
+
+    // Trace star: hidden at the path start; revealed and faded in during Waiting,
+    // then moved along the path during Sliding.
+    let start = path.waypoints.first().copied().unwrap_or(Vec2::ZERO);
+    parent.spawn((
+        star_shape(assets, color),
+        Transform::from_translation(start.extend(3.0)),
+        Visibility::Hidden,
+        SlideElement::TraceStar,
+    ));
+
+    // Chevron arrows spaced along the path, each rotated to face the travel
+    // direction. Their alpha fades in during Growing; each is removed as the
+    // trace star passes it during Sliding.
+    let mut d = super::CHEVRON_SPACING;
+    while d < path.total_length {
+        let (pos, angle) = slide_path::get_transform_at_distance(&path.waypoints, d);
+        parent.spawn((
+            chevron_shape(assets, color.with_alpha(0.0)),
+            Transform::from_translation(pos.extend(1.0))
+                .with_rotation(Quat::from_rotation_z(angle)),
+            SlideArrow {
+                distance_along_path: d,
+            },
+        ));
+        d += super::CHEVRON_SPACING;
     }
 }

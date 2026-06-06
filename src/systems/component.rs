@@ -37,7 +37,7 @@ pub struct Note {
 #[derive(Debug, Clone)]
 pub struct SlideSegment {
     pub shape: SlideShape,
-    pub duration: SlideDuration,
+    pub duration: Duration,
     /// The break modifier for the specific tracing path (independent of the star).
     pub is_break: bool,
 }
@@ -47,8 +47,7 @@ pub enum NoteKind {
     Tap(ButtonId),
     TapHold {
         button: ButtonId,
-        divider: Divider,
-        count: Count,
+        duration: Duration,
     },
     Touch {
         value: TouchValue,
@@ -57,8 +56,7 @@ pub enum NoteKind {
     TouchHold {
         value: TouchValue,
         group: TouchArea,
-        divider: Divider,
-        count: Count,
+        duration: Duration,
     },
 
     /// A star head with NO path. Acts like a Tap, but is visually a star.
@@ -81,7 +79,8 @@ pub enum NoteKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SlideDuration {
+pub enum Duration {
+    // The above duration can be used for all type of "holding" note elements.
     Simple {
         divider: Divider,
         count: Count,
@@ -95,6 +94,7 @@ pub enum SlideDuration {
         bpm: f32,
         seconds: f32,
     },
+    // Specialy designed for slide.
     ExplicitWaitAndTrace {
         wait_seconds: f32,
         trace_seconds: f32,

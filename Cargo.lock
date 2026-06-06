@@ -2528,6 +2528,7 @@ dependencies = [
  "bevy",
  "bevy_kira_audio",
  "bevy_prototype_lyon",
+ "regex",
 ]
 
 [[package]]

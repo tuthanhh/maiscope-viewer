@@ -14,7 +14,7 @@
 
 use bevy::{color::Color, prelude::Vec2};
 use bevy_prototype_lyon::prelude::*;
-use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use std::f32::consts::{PI, TAU};
 
 use crate::systems::visual::{NOTE_RADIUS, resources::NoteAssets};
 
@@ -253,25 +253,44 @@ pub fn build_chevron_path(radius: f32) -> ShapePath {
 }
 
 // ============================================================================
-// Touch-hold countdown arc
+// Touch-hold countdown square
 // ============================================================================
 
-/// Build the `ShapePath` for a touch-hold countdown arc at a given sweep.
+/// Square countdown outline traced clockwise from top-center.
 ///
-/// The arc starts at the top of the circle (12-o'clock, angle = π/2 from +X)
-/// and sweeps **clockwise** by `sweep_radians`. A full circle uses `TAU`.
-///
-/// * `arc_radius`    — radius of the countdown ring.
-/// * `sweep_radians` — how much of the circle remains (TAU = full, 0 = empty).
-pub fn build_countdown_arc_path(arc_radius: f32, sweep_radians: f32) -> ShapePath {
-    let start_x = arc_radius * FRAC_PI_2.cos(); // ≈ 0
-    let start_y = arc_radius * FRAC_PI_2.sin(); // ≈ arc_radius (top)
-    ShapePath::new().move_to(Vec2::new(start_x, start_y)).arc(
-        Vec2::ZERO,
-        Vec2::splat(arc_radius),
-        -sweep_radians, // negative = clockwise
-        0.0,
-    )
+/// * `s`.
+/// * `fraction`  — 0.0 = empty, 1.0 = full perimeter drawn.
+pub fn build_countdown_path(s: f32, fraction: f32) -> ShapePath {
+    // Diamond (rotated square): clockwise from top vertex through right, bottom, left, back to top.
+    // Each side length = s * SQRT_2; total perimeter = 4 * s * SQRT_2.
+    let corners = [
+        Vec2::new(s, 0.0),
+        Vec2::new(0.0, -s),
+        Vec2::new(-s, 0.0),
+        Vec2::new(0.0, s),
+    ];
+
+    let start = Vec2::new(0.0, s);
+    let mut path = ShapePath::new().move_to(start);
+    let mut prev = start;
+    let mut remaining = fraction.clamp(0.0, 1.0) * 4.0 * s * std::f32::consts::SQRT_2;
+
+    for &corner in &corners {
+        if remaining <= 0.0 {
+            break;
+        }
+        let seg_len = prev.distance(corner);
+        if remaining >= seg_len {
+            path = path.line_to(corner);
+            prev = corner;
+            remaining -= seg_len;
+        } else {
+            path = path.line_to(prev.lerp(corner, remaining / seg_len));
+            break;
+        }
+    }
+
+    path
 }
 
 // ── Shape builders ─────────────────────────────────────────────────────────
@@ -308,6 +327,18 @@ pub(super) fn touch_triangle_shape(assets: &NoteAssets, color: Color) -> Shape {
 
 pub(super) fn touch_hold_triangle_shape(assets: &NoteAssets, color: Color) -> Shape {
     ShapeBuilder::with(&assets.touch_hold_triangle_path)
+        .fill(color)
+        .build()
+}
+
+pub(super) fn star_shape(assets: &NoteAssets, color: Color) -> Shape {
+    ShapeBuilder::with(&assets.slide_star_path)
+        .fill(color)
+        .build()
+}
+
+pub(super) fn chevron_shape(assets: &NoteAssets, color: Color) -> Shape {
+    ShapeBuilder::with(&assets.chevron_path)
         .fill(color)
         .build()
 }

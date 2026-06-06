@@ -3,6 +3,7 @@ mod judgement_circle;
 mod movement;
 pub mod resources;
 mod shapes;
+mod slide_path;
 mod spawning;
 
 pub use judgement_circle::spawn_judgement_ring;
@@ -11,6 +12,8 @@ pub use spawning::next_event;
 
 const RADIUS: f32 = 350.0;
 const NOTE_RADIUS: f32 = 35.0;
+/// Spacing between chevron arrows along a slide track. Tune visually.
+const CHEVRON_SPACING: f32 = NOTE_RADIUS * 0.75;
 
 #[allow(unused)]
 pub mod note_colors {
