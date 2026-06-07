@@ -26,7 +26,7 @@ impl Default for ChartPlayback {
             timed_events: Vec::new(),
             next_spawn_index: 0,
             note_speed: 7.0,
-            chart_speed: 0.25,
+            chart_speed: 1.0,
             is_playing: true,
             elapsed_time: 0.0,
         }

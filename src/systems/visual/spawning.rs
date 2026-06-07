@@ -8,7 +8,7 @@ use super::{
     resources::{ButtonLayout, NoteAssets},
     shapes::{
         chevron_shape, hold_arch_shape, hold_body_shape, star_shape, tap_shape, touch_circle_shape,
-        touch_hold_triangle_shape, touch_triangle_shape,
+        touch_hold_triangle_shape, touch_triangle_shape, touch_triangle_start_distance,
     },
     slide_path,
 };
@@ -57,6 +57,7 @@ pub fn next_event(
         if let ChartEvent::NoteGroup(notes) = event {
             let is_paired = notes.len() >= 2;
             for note in &notes {
+                println!("Spawning note: {note:?} (paired: {is_paired})");
                 spawn_note(
                     &mut commands,
                     note,
@@ -169,7 +170,7 @@ fn spawn_note(
                 *head_button,
                 bpm,
                 *shared_duration,
-                super::RADIUS,
+                layout,
             );
             let has_head = matches!(note.kind, NoteKind::Slide { .. });
             let color = slide_color(is_paired);
@@ -222,7 +223,7 @@ fn spawn_hold_children(
 }
 
 fn spawn_touch_hold_countdown(parent: &mut RelatedSpawnerCommands<ChildOf>, assets: &NoteAssets) {
-    let arc_radius = NOTE_RADIUS * 1.15;
+    let arc_radius = super::COUNTDOWN_RADIUS;
     parent.spawn((
         ShapeBuilder::with(&assets.countdown_arc_path)
             .stroke((note_colors::RING, NOTE_RADIUS * 0.18))
@@ -239,7 +240,7 @@ fn spawn_approach_triangles(
     is_hold: bool,
     assets: &NoteAssets,
 ) {
-    let dist = NOTE_RADIUS * 0.65;
+    let dist = touch_triangle_start_distance(NOTE_RADIUS);
 
     if !is_hold {
         for dir in [Vec2::Y, Vec2::NEG_Y, Vec2::NEG_X, Vec2::X] {

@@ -50,6 +50,10 @@ pub struct SlideArrow {
     pub distance_along_path: f32,
 }
 
+/// Glowing halo child spawned around a hold head during the Holding phase.
+#[derive(Component)]
+pub struct HoldHalo;
+
 /// Marks the two star visuals that belong to a slide note.
 #[derive(Component)]
 pub enum SlideElement {

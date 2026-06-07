@@ -14,6 +14,8 @@ const RADIUS: f32 = 350.0;
 const NOTE_RADIUS: f32 = 35.0;
 /// Spacing between chevron arrows along a slide track. Tune visually.
 const CHEVRON_SPACING: f32 = NOTE_RADIUS * 0.75;
+/// Radius of the TouchHold countdown ring (single source of truth).
+const COUNTDOWN_RADIUS: f32 = NOTE_RADIUS * 1.15;
 
 #[allow(unused)]
 pub mod note_colors {
@@ -68,6 +70,8 @@ pub mod note_colors {
     /// Matches `bevy::color::palettes::css::LIGHT_CYAN` but kept here so
     /// every color lives in one file.
     pub const CHEVRON: Color = Color::srgb(0.878, 1.0, 1.0);
+
+    pub const HEXAGON: Color = Color::srgb(1.0, 0.8, 0.0);
 
     /// Screen background.
     pub const BACKGROUND: Color = Color::srgb(0.0, 0.0, 0.0);

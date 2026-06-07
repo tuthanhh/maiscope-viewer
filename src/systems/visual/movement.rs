@@ -1,4 +1,4 @@
-use super::{RADIUS, component::NoteTiming, resources::ButtonLayout};
+use super::{RADIUS, component::NoteTiming, resources::ButtonLayout, resources::NoteAssets};
 use crate::systems::{
     MOVING,
     chart_playback::ChartPlayback,
@@ -6,10 +6,12 @@ use crate::systems::{
     visual::{
         NOTE_RADIUS,
         component::{
-            HoldNoteElement, NoteBpm, SlideArrow, SlideElement, SlidePath, TouchElement,
+            HoldHalo, HoldNoteElement, NoteBpm, SlideArrow, SlideElement, SlidePath, TouchElement,
             TouchHoldCountdown,
         },
-        note_colors, shapes, slide_path,
+        note_colors,
+        shapes::{self, hexagon_shape, hold_halo_shape},
+        slide_path,
     },
 };
 use bevy::prelude::*;
@@ -39,7 +41,23 @@ type HoldElementQuery<'w, 's> = Query<
         Without<SlideElement>,
     ),
 >;
-
+type HaloHoldQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Shape,
+        &'static mut Transform,
+        &'static HoldHalo,
+    ),
+    (
+        Without<NoteTiming>,
+        Without<TouchElement>,
+        Without<TouchHoldCountdown>,
+        Without<SlideArrow>,
+        Without<SlideElement>,
+        Without<HoldNoteElement>,
+    ),
+>;
 type CountdownQuery<'w, 's> = Query<
     'w,
     's,
@@ -51,7 +69,6 @@ type CountdownQuery<'w, 's> = Query<
     (
         Without<NoteTiming>,
         Without<TouchElement>,
-        Without<TouchHoldCountdown>,
         Without<SlideArrow>,
     ),
 >;
@@ -99,6 +116,12 @@ fn duration_to_secs(duration: Duration, bpm: f32) -> f32 {
     }
 }
 
+/// True hold-bar length: how far the note travels during the hold
+/// (`velocity · hold_secs`, where `velocity = travel_dist / move_duration`).
+fn hold_max_tail(travel_dist: f32, speed: f32, duration: Duration, bpm: f32) -> f32 {
+    travel_dist * speed / MOVING as f32 * duration_to_secs(duration, bpm)
+}
+
 fn set_alpha(shape: &mut Shape, a: f32) {
     if let Some(fill) = shape.fill.as_mut() {
         fill.color.set_alpha(a);
@@ -112,6 +135,7 @@ pub fn update_movement(
     mut commands: Commands,
     mut entity_query: Query<(
         Entity,
+        Option<&mut Shape>,
         &mut Transform,
         &mut NoteTiming,
         &NoteKind,
@@ -125,15 +149,18 @@ pub fn update_movement(
     mut countdown_query: CountdownQuery,
     mut slide_elements: SlideElementQuery,
     mut slide_arrows: SlideArrowQuery,
+    mut halo_holds: HaloHoldQuery,
     chart: Res<ChartPlayback>,
     layout: Res<ButtonLayout>,
     time: Res<Time>,
+    assets: Res<NoteAssets>,
 ) {
     let speed = chart.chart_speed * chart.note_speed;
     let move_duration = MOVING as f32 / speed;
 
     for (
         entity,
+        mut shape,
         mut transform,
         mut timing,
         kind,
@@ -186,7 +213,7 @@ pub fn update_movement(
                 if timer.just_finished() {
                     match kind {
                         NoteKind::Tap(_) | NoteKind::Touch { .. } | NoteKind::SlideStar { .. } => {
-                            *timing = NoteTiming::Dying(Timer::from_seconds(0.1, TimerMode::Once));
+                            *timing = NoteTiming::Dying(Timer::from_seconds(0.25, TimerMode::Once));
                         }
                         NoteKind::TapHold { duration, .. }
                         | NoteKind::TouchHold { duration, .. } => {
@@ -207,22 +234,32 @@ pub fn update_movement(
                 }
             }
             NoteTiming::Holding(timer) => {
+                if timer.elapsed().is_zero() {
+                    // adding an effect visual, a glowing halo around the head, to make it more visually distinct from a regular tap
+                    commands.entity(entity).with_children(|parent| {
+                        parent.spawn((hold_halo_shape(&assets, note_colors::HEXAGON), HoldHalo));
+                    });
+                }
                 timer.tick(time.delta());
+
                 let t = timer.fraction();
+
                 match kind {
                     NoteKind::TapHold { .. } => {
                         hold_tap(
                             kind,
                             t,
+                            timer,
                             note_bpm.map(|b| b.0).unwrap_or(0.0),
                             speed,
                             children,
                             &mut hold_elements,
+                            &mut halo_holds,
                             &layout,
                         );
                     }
                     NoteKind::TouchHold { .. } => {
-                        hold_touch(t, children, &mut countdown_query);
+                        hold_touch(t, timer, children, &mut countdown_query, &mut halo_holds);
                     }
                     _ => {}
                 }
@@ -235,7 +272,9 @@ pub fn update_movement(
                 timer.tick(time.delta());
                 wait_slide(timer.fraction(), children, &mut slide_elements);
                 if timer.just_finished() {
-                    let total = slide_path_data.map(slide_path::trace_total_secs).unwrap_or(0.0);
+                    let total = slide_path_data
+                        .map(slide_path::trace_total_secs)
+                        .unwrap_or(0.0);
                     *timing = NoteTiming::Sliding(Timer::from_seconds(total, TimerMode::Once));
                 }
             }
@@ -253,16 +292,53 @@ pub fn update_movement(
                     );
                 }
                 if timer.just_finished() {
-                    *timing = NoteTiming::Dying(Timer::from_seconds(0.1, TimerMode::Once));
+                    *timing = NoteTiming::Dying(Timer::from_seconds(0.25, TimerMode::Once));
                 }
             }
             NoteTiming::Dying(timer) => {
+                // On the very first frame: transform into a hexagon
                 if timer.elapsed().is_zero() {
-                    // Play the guide sound
+                    // Despawn all children (slide stars, hold bodies, touch triangles)
+                    // so we only see the hexagon effect
+                    if let Some(children) = children {
+                        for child in children.iter() {
+                            commands.entity(child).despawn();
+                        }
+                    }
+                    // Swap the note's shape path to a hexagon
+                    if let Some(shape) = shape.as_deref_mut() {
+                        *shape = hexagon_shape(&assets, note_colors::HEXAGON);
+                        // handle the touch effect later.
+                    } else {
+                        if matches!(kind, NoteKind::TouchHold { .. } | NoteKind::TapHold { .. }) {
+                            commands
+                                .entity(entity)
+                                .insert(hexagon_shape(&assets, note_colors::HEXAGON));
+                        }
+                    }
+                }
+
+                timer.tick(time.delta());
+                let t = timer.fraction();
+
+                // Calculate the wave: goes 0.0 -> 1.0 -> 0.0
+                let wave = (t * std::f32::consts::PI).sin();
+
+                // 1. Increase and Decrease Scale
+                // Base scale is 1.0, expands up to 2.0 at the peak, then shrinks back to 1.0
+                // (Tweak the 1.0 multiplier to make the pop bigger or smaller)
+                transform.scale = Vec3::splat(1.0 + (wave * 1.0));
+
+                // 2. Fade In and Fade Out
+                // Alpha follows the wave exactly (0% -> 100% -> 0%)
+                if let Some(shape) = shape.as_deref_mut() {
+                    set_alpha(shape, wave);
+                }
+
+                // 3. Final Cleanup
+                if timer.just_finished() {
                     commands.entity(entity).despawn();
                 }
-                timer.tick(time.delta());
-                // Play the after effect
             }
         }
     }
@@ -308,6 +384,7 @@ fn move_taphold(
     let NoteKind::TapHold { button, duration } = kind else {
         return;
     };
+
     let Some(children) = children else { return };
 
     let spawn = layout.tap_spawn[button - 1] * RADIUS;
@@ -315,7 +392,7 @@ fn move_taphold(
     transform.translation = spawn.lerp(hit, t).extend(2.0);
 
     let travel_dist = spawn.distance(hit);
-    let max_tail = travel_dist * speed / MOVING as f32 * duration_to_secs(*duration, bpm);
+    let max_tail = hold_max_tail(travel_dist, speed, *duration, bpm);
     let current_length = (travel_dist * t).min(max_tail);
 
     for child in children.iter() {
@@ -349,6 +426,7 @@ fn move_slide(
                     head_button: id, ..
                 } = kind
                 {
+                    // Land on the outer rim, coinciding with the path start.
                     let spawn = layout.tap_spawn[id - 1] * RADIUS;
                     let hit = layout.tap[id - 1] * RADIUS;
                     transform.translation = spawn.lerp(hit, t).extend(2.0);
@@ -419,7 +497,7 @@ fn move_triangles(
         return;
     }
     let Some(children) = children else { return };
-    let current_dist = 0.65 * NOTE_RADIUS * (1.0 - t);
+    let current_dist = shapes::touch_triangle_start_distance(NOTE_RADIUS) * (1.0 - t);
     for child in children.iter() {
         if let Ok((mut tf, element)) = triangles.get_mut(child) {
             if matches!(element, TouchElement::Triangle) {
@@ -433,10 +511,12 @@ fn move_triangles(
 fn hold_tap(
     kind: &NoteKind,
     t: f32,
+    timer: &Timer,
     bpm: f32,
     speed: f32,
     children: Option<&Children>,
     hold_elements: &mut HoldElementQuery,
+    halo_holds: &mut HaloHoldQuery,
     layout: &ButtonLayout,
 ) {
     let NoteKind::TapHold { button, duration } = kind else {
@@ -448,7 +528,7 @@ fn hold_tap(
     let hit = layout.tap[button - 1] * RADIUS;
 
     let travel_dist = spawn.distance(hit);
-    let max_tail = travel_dist * speed / MOVING as f32 * duration_to_secs(*duration, bpm);
+    let max_tail = hold_max_tail(travel_dist, speed, *duration, bpm);
     let current_length = (max_tail * (1.0 - t)).min(travel_dist);
 
     for child in children.iter() {
@@ -464,10 +544,23 @@ fn hold_tap(
                 HoldNoteElement::Head => {}
             }
         }
+        if let Ok((mut shape, mut transform, _)) = halo_holds.get_mut(child) {
+            // Halo pulse: a 0.25s sawtooth that repeats for the whole hold —
+            // scale ramps 0.75 -> 1.75 and alpha 0.3 -> 0.5, then snaps back.
+            let cycle = (timer.elapsed_secs() % 0.25) / 0.25;
+            transform.scale = Vec3::splat(0.75 + cycle); // 0.75 -> 1.75
+            set_alpha(&mut shape, 0.3 + cycle * 0.2); // 0.3 -> 0.5
+        }
     }
 }
 
-fn hold_touch(t: f32, children: Option<&Children>, countdown_query: &mut CountdownQuery) {
+fn hold_touch(
+    t: f32,
+    timer: &Timer,
+    children: Option<&Children>,
+    countdown_query: &mut CountdownQuery,
+    halo_holds: &mut HaloHoldQuery,
+) {
     let Some(children) = children else { return };
     for child in children.iter() {
         if let Ok((mut arc_shape, mut vis, countdown)) = countdown_query.get_mut(child) {
@@ -475,9 +568,16 @@ fn hold_touch(t: f32, children: Option<&Children>, countdown_query: &mut Countdo
             let r = countdown.arc_radius;
             let new_path = shapes::build_countdown_path(r, t);
             arc_shape.path = ShapeBuilder::with(&new_path)
-                .stroke((note_colors::RING, r * 0.15))
+                .stroke((note_colors::RING, NOTE_RADIUS * 0.18))
                 .build()
                 .path;
+        }
+        if let Ok((mut shape, mut transform, _)) = halo_holds.get_mut(child) {
+            // Halo pulse: a 0.25s sawtooth that repeats for the whole hold —
+            // scale ramps 0.75 -> 1.75 and alpha 0.3 -> 0.5, then snaps back.
+            let cycle = (timer.elapsed_secs() % 0.25) / 0.25;
+            transform.scale = Vec3::splat(0.75 + cycle); // 0.75 -> 1.75
+            set_alpha(&mut shape, 0.3 + cycle * 0.2); // 0.3 -> 0.5
         }
     }
 }

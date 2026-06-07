@@ -2,38 +2,42 @@
 #![allow(dead_code)]
 
 use bevy::prelude::Vec2;
-use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI, TAU};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 use crate::systems::component::{Duration, SlideSegment, SlideShape};
 
+use super::RADIUS;
 use super::component::SlidePath;
+use super::resources::ButtonLayout;
 
 // cos(3*pi/8) = sin(pi/8) ≈ 0.3827 — natural tangent-circle radius for P/Q inner loop
 const INNER_RING_FRAC: f32 = 0.382_683_43;
-// B-sensor ring fraction — matches ButtonLayout's `b` ring at 2.3/4.8 of the radius.
-const B_RING_FRAC: f32 = 2.3 / 4.8;
 
 // ── Button geometry ──────────────────────────────────────────────────────────
-// Matches ButtonLayout's angle convention: button index 1..=8 increases
-// counter-clockwise, with button 1 at FRAC_PI_8 (ButtonLayout's rings use
-// `FRAC_PI_8 + i·FRAC_PI_4`).
+// All sensor positions and angles are derived from `ButtonLayout` — the single
+// source of truth shared with taps/touches — so the slide path can never drift
+// out of sync with the rest of the play-field. `ButtonLayout` stores unit-scaled
+// ring vectors; multiplying by `RADIUS` gives world positions.
 
 /// Polar angle of a button's spoke, in radians.
-fn button_angle(button: usize) -> f32 {
-    FRAC_PI_8 + (button - 1) as f32 * FRAC_PI_4
+fn button_angle(button: usize, layout: &ButtonLayout) -> f32 {
+    layout.tap[button - 1].to_angle()
 }
 
-/// A-sensor (outer judgment ring) position at the full boundary radius.
-fn a_sensor_pos(button: usize, boundary_radius: f32) -> Vec2 {
-    let ang = button_angle(button);
-    Vec2::new(boundary_radius * ang.cos(), boundary_radius * ang.sin())
+/// World radius of the A-sensor ring. Slide endpoints sit on the outer rim
+/// (the `tap` ring, where taps land), so the slide head and path start coincide.
+fn a_ring_radius(layout: &ButtonLayout) -> f32 {
+    layout.tap[0].length() * RADIUS
 }
 
-/// B-sensor (inner ring) position at `B_RING_FRAC` of the boundary radius.
-fn b_sensor_pos(button: usize, boundary_radius: f32) -> Vec2 {
-    let r = boundary_radius * B_RING_FRAC;
-    let ang = button_angle(button);
-    Vec2::new(r * ang.cos(), r * ang.sin())
+/// A-sensor ring position (slide endpoint) for `button` — on the outer rim.
+fn a_sensor_pos(button: usize, layout: &ButtonLayout) -> Vec2 {
+    layout.tap[button - 1] * RADIUS
+}
+
+/// B-sensor ring position for `button` — inner ring from `ButtonLayout`.
+fn b_sensor_pos(button: usize, layout: &ButtonLayout) -> Vec2 {
+    layout.b[button - 1] * RADIUS
 }
 
 /// The play-field center.
@@ -232,32 +236,24 @@ fn append_path_dedup(base: &mut Vec<Vec2>, mut next_segment: Vec<Vec2>) {
 /// # Arguments
 /// * `shape` - The slide shape to generate
 /// * `start_button` - 1-based button the segment starts from
-/// * `boundary_radius` - The radius of the outer A-sensor ring (judgment line)
-pub fn generate_points(shape: &SlideShape, start_button: usize, boundary_radius: f32) -> Vec<Vec2> {
+/// * `layout` - The button layout providing sensor ring positions/angles
+pub fn generate_points(shape: &SlideShape, start_button: usize, layout: &ButtonLayout) -> Vec<Vec2> {
     let s = start_button;
     match shape {
-        SlideShape::Straight { end } => generate_shape_straight(s, *end, boundary_radius),
-        SlideShape::ShortArc { end } => generate_shape_short_arc(s, *end, boundary_radius),
-        SlideShape::ClockwiseArc { end } => generate_shape_clockwise_arc(s, *end, boundary_radius),
-        SlideShape::CounterClockwiseArc { end } => generate_shape_ccw_arc(s, *end, boundary_radius),
-        SlideShape::VShape { end } => generate_shape_v(s, *end, boundary_radius),
-        SlideShape::GrandVShape { mid, end } => {
-            generate_shape_grand_v(s, *end, *mid, boundary_radius)
-        }
-        SlideShape::PShape { end } => generate_shape_inner_loop(s, *end, false, boundary_radius),
-        SlideShape::QShape { end } => generate_shape_inner_loop(s, *end, true, boundary_radius),
-        SlideShape::GrandPShape { end } => {
-            generate_shape_grand_loop(s, *end, false, boundary_radius)
-        }
-        SlideShape::GrandQShape { end } => {
-            generate_shape_grand_loop(s, *end, true, boundary_radius)
-        }
-        SlideShape::Thunderbolt { end, is_z } => {
-            generate_shape_thunderbolt(s, *end, *is_z, boundary_radius)
-        }
+        SlideShape::Straight { end } => generate_shape_straight(s, *end, layout),
+        SlideShape::ShortArc { end } => generate_shape_short_arc(s, *end, layout),
+        SlideShape::ClockwiseArc { end } => generate_shape_clockwise_arc(s, *end, layout),
+        SlideShape::CounterClockwiseArc { end } => generate_shape_ccw_arc(s, *end, layout),
+        SlideShape::VShape { end } => generate_shape_v(s, *end, layout),
+        SlideShape::GrandVShape { mid, end } => generate_shape_grand_v(s, *end, *mid, layout),
+        SlideShape::PShape { end } => generate_shape_inner_loop(s, *end, false, layout),
+        SlideShape::QShape { end } => generate_shape_inner_loop(s, *end, true, layout),
+        SlideShape::GrandPShape { end } => generate_shape_grand_loop(s, *end, false, layout),
+        SlideShape::GrandQShape { end } => generate_shape_grand_loop(s, *end, true, layout),
+        SlideShape::Thunderbolt { end, is_z } => generate_shape_thunderbolt(s, *end, *is_z, layout),
         SlideShape::FanShape {
             ends: (e1, _e2, _e3),
-        } => generate_shape_fan(s, *e1, boundary_radius),
+        } => generate_shape_fan(s, *e1, layout),
     }
 }
 
@@ -266,16 +262,17 @@ pub fn generate_points(shape: &SlideShape, start_button: usize, boundary_radius:
 // ============================================================================
 
 // STRAIGHT (-): Direct line from start A-sensor to end A-sensor.
-fn generate_shape_straight(start: usize, end: usize, boundary_radius: f32) -> Vec<Vec2> {
-    let p1 = a_sensor_pos(start, boundary_radius);
-    let p2 = a_sensor_pos(end, boundary_radius);
+fn generate_shape_straight(start: usize, end: usize, layout: &ButtonLayout) -> Vec<Vec2> {
+    let p1 = a_sensor_pos(start, layout);
+    let p2 = a_sensor_pos(end, layout);
     generate_multi_segment_points(&[p1, p2], 35.0)
 }
 
 // SHORT ARC (^): The shortest arc along the boundary ring (never > 180°).
-fn generate_shape_short_arc(start: usize, end: usize, boundary_radius: f32) -> Vec<Vec2> {
-    let start_ang = button_angle(start);
-    let end_ang = button_angle(end);
+fn generate_shape_short_arc(start: usize, end: usize, layout: &ButtonLayout) -> Vec<Vec2> {
+    let r = a_ring_radius(layout);
+    let start_ang = button_angle(start, layout);
+    let end_ang = button_angle(end, layout);
 
     let mut diff = (end_ang - start_ang) % TAU;
     if diff > PI {
@@ -286,19 +283,20 @@ fn generate_shape_short_arc(start: usize, end: usize, boundary_radius: f32) -> V
     }
     let target = start_ang + diff;
 
-    generate_arc_points(start_ang, target, boundary_radius, 35.0)
+    generate_arc_points(start_ang, target, r, 35.0)
 }
 
 // CLOCKWISE ARC (>): Arc that passes to the RIGHT of the straight line from
 // start to end. Cross product of (end−start) × (mid−start) < 0 = right side.
 // Opposite buttons: default CW. Same button: full circle CW.
-fn generate_shape_clockwise_arc(start: usize, end: usize, boundary_radius: f32) -> Vec<Vec2> {
+fn generate_shape_clockwise_arc(start: usize, end: usize, layout: &ButtonLayout) -> Vec<Vec2> {
     let spacing = 35.0;
-    let start_ang = button_angle(start);
-    let end_ang = button_angle(end);
+    let r = a_ring_radius(layout);
+    let start_ang = button_angle(start, layout);
+    let end_ang = button_angle(end, layout);
 
     if start == end {
-        return generate_arc_points(start_ang, start_ang - TAU, boundary_radius, spacing);
+        return generate_arc_points(start_ang, start_ang - TAU, r, spacing);
     }
 
     let steps = (end as isize - start as isize).rem_euclid(8) as usize;
@@ -310,17 +308,11 @@ fn generate_shape_clockwise_arc(start: usize, end: usize, boundary_radius: f32) 
             }
             e
         };
-        return generate_arc_points(start_ang, cw_end, boundary_radius, spacing);
+        return generate_arc_points(start_ang, cw_end, r, spacing);
     }
 
-    let p_start = Vec2::new(
-        boundary_radius * start_ang.cos(),
-        boundary_radius * start_ang.sin(),
-    );
-    let p_end = Vec2::new(
-        boundary_radius * end_ang.cos(),
-        boundary_radius * end_ang.sin(),
-    );
+    let p_start = Vec2::new(r * start_ang.cos(), r * start_ang.sin());
+    let p_end = Vec2::new(r * end_ang.cos(), r * end_ang.sin());
     let cw_end = {
         let mut e = end_ang;
         while e >= start_ang {
@@ -329,16 +321,13 @@ fn generate_shape_clockwise_arc(start: usize, end: usize, boundary_radius: f32) 
         e
     };
     let mid_cw_ang = start_ang + (cw_end - start_ang) * 0.5;
-    let mid_cw = Vec2::new(
-        boundary_radius * mid_cw_ang.cos(),
-        boundary_radius * mid_cw_ang.sin(),
-    );
+    let mid_cw = Vec2::new(r * mid_cw_ang.cos(), r * mid_cw_ang.sin());
     let dir = p_end - p_start;
     let to_mid = mid_cw - p_start;
     let cross = dir.x * to_mid.y - dir.y * to_mid.x;
 
     if cross < 0.0 {
-        generate_arc_points(start_ang, cw_end, boundary_radius, spacing)
+        generate_arc_points(start_ang, cw_end, r, spacing)
     } else if cross > 0.0 {
         let ccw_end = {
             let mut e = end_ang;
@@ -347,22 +336,23 @@ fn generate_shape_clockwise_arc(start: usize, end: usize, boundary_radius: f32) 
             }
             e
         };
-        generate_arc_points(start_ang, ccw_end, boundary_radius, spacing)
+        generate_arc_points(start_ang, ccw_end, r, spacing)
     } else {
-        generate_arc_points(start_ang, cw_end, boundary_radius, spacing)
+        generate_arc_points(start_ang, cw_end, r, spacing)
     }
 }
 
 // COUNTER-CLOCKWISE ARC (<): Arc that passes to the LEFT of the straight line
 // from start to end. Cross product > 0 = left side.
 // Opposite buttons: force CW (complementary half to >). Same button: full circle CCW.
-fn generate_shape_ccw_arc(start: usize, end: usize, boundary_radius: f32) -> Vec<Vec2> {
+fn generate_shape_ccw_arc(start: usize, end: usize, layout: &ButtonLayout) -> Vec<Vec2> {
     let spacing = 35.0;
-    let start_ang = button_angle(start);
-    let end_ang = button_angle(end);
+    let r = a_ring_radius(layout);
+    let start_ang = button_angle(start, layout);
+    let end_ang = button_angle(end, layout);
 
     if start == end {
-        return generate_arc_points(start_ang, start_ang + TAU, boundary_radius, spacing);
+        return generate_arc_points(start_ang, start_ang + TAU, r, spacing);
     }
 
     let steps = (end as isize - start as isize).rem_euclid(8) as usize;
@@ -374,17 +364,11 @@ fn generate_shape_ccw_arc(start: usize, end: usize, boundary_radius: f32) -> Vec
             }
             e
         };
-        return generate_arc_points(start_ang, cw_end, boundary_radius, spacing);
+        return generate_arc_points(start_ang, cw_end, r, spacing);
     }
 
-    let p_start = Vec2::new(
-        boundary_radius * start_ang.cos(),
-        boundary_radius * start_ang.sin(),
-    );
-    let p_end = Vec2::new(
-        boundary_radius * end_ang.cos(),
-        boundary_radius * end_ang.sin(),
-    );
+    let p_start = Vec2::new(r * start_ang.cos(), r * start_ang.sin());
+    let p_end = Vec2::new(r * end_ang.cos(), r * end_ang.sin());
     let ccw_end = {
         let mut e = end_ang;
         while e <= start_ang {
@@ -393,16 +377,13 @@ fn generate_shape_ccw_arc(start: usize, end: usize, boundary_radius: f32) -> Vec
         e
     };
     let mid_ccw_ang = start_ang + (ccw_end - start_ang) * 0.5;
-    let mid_ccw = Vec2::new(
-        boundary_radius * mid_ccw_ang.cos(),
-        boundary_radius * mid_ccw_ang.sin(),
-    );
+    let mid_ccw = Vec2::new(r * mid_ccw_ang.cos(), r * mid_ccw_ang.sin());
     let dir = p_end - p_start;
     let to_mid = mid_ccw - p_start;
     let cross = dir.x * to_mid.y - dir.y * to_mid.x;
 
     if cross > 0.0 {
-        generate_arc_points(start_ang, ccw_end, boundary_radius, spacing)
+        generate_arc_points(start_ang, ccw_end, r, spacing)
     } else if cross < 0.0 {
         let cw_end = {
             let mut e = end_ang;
@@ -411,25 +392,25 @@ fn generate_shape_ccw_arc(start: usize, end: usize, boundary_radius: f32) -> Vec
             }
             e
         };
-        generate_arc_points(start_ang, cw_end, boundary_radius, spacing)
+        generate_arc_points(start_ang, cw_end, r, spacing)
     } else {
-        generate_arc_points(start_ang, ccw_end, boundary_radius, spacing)
+        generate_arc_points(start_ang, ccw_end, r, spacing)
     }
 }
 
 // V-SHAPE (v): start A-sensor → center → end A-sensor.
-fn generate_shape_v(start: usize, end: usize, boundary_radius: f32) -> Vec<Vec2> {
-    let p_start = a_sensor_pos(start, boundary_radius);
+fn generate_shape_v(start: usize, end: usize, layout: &ButtonLayout) -> Vec<Vec2> {
+    let p_start = a_sensor_pos(start, layout);
     let p_center = center_pos();
-    let p_end = a_sensor_pos(end, boundary_radius);
+    let p_end = a_sensor_pos(end, layout);
     generate_multi_segment_points(&[p_start, p_center, p_end], 35.0)
 }
 
 // GRAND V-SHAPE (V): start A-sensor → mid A-sensor → end A-sensor.
-fn generate_shape_grand_v(start: usize, end: usize, mid: usize, boundary_radius: f32) -> Vec<Vec2> {
-    let p_start = a_sensor_pos(start, boundary_radius);
-    let p_mid = a_sensor_pos(mid, boundary_radius);
-    let p_end = a_sensor_pos(end, boundary_radius);
+fn generate_shape_grand_v(start: usize, end: usize, mid: usize, layout: &ButtonLayout) -> Vec<Vec2> {
+    let p_start = a_sensor_pos(start, layout);
+    let p_mid = a_sensor_pos(mid, layout);
+    let p_end = a_sensor_pos(end, layout);
     generate_multi_segment_points(&[p_start, p_mid, p_end], 35.0)
 }
 
@@ -444,13 +425,13 @@ fn generate_shape_inner_loop(
     start: usize,
     end: usize,
     is_q: bool,
-    boundary_radius: f32,
+    layout: &ButtonLayout,
 ) -> Vec<Vec2> {
     let spacing = 35.0;
-    let r_inner = boundary_radius * INNER_RING_FRAC;
+    let r_inner = a_ring_radius(layout) * INNER_RING_FRAC;
 
-    let p_start = a_sensor_pos(start, boundary_radius);
-    let p_end = a_sensor_pos(end, boundary_radius);
+    let p_start = a_sensor_pos(start, layout);
+    let p_end = a_sensor_pos(end, layout);
 
     let (t_ccw_entry, t_cw_entry) = tangent_points_to_circle(p_start, r_inner);
     let (t_ccw_exit, t_cw_exit) = tangent_points_to_circle(p_end, r_inner);
@@ -503,11 +484,11 @@ fn generate_shape_grand_loop(
     start: usize,
     end: usize,
     is_q: bool,
-    boundary_radius: f32,
+    layout: &ButtonLayout,
 ) -> Vec<Vec2> {
     let spacing = 35.0;
-    let r_loop = boundary_radius * 0.5;
-    let start_ang = button_angle(start);
+    let r_loop = a_ring_radius(layout) * 0.5;
+    let start_ang = button_angle(start, layout);
 
     // Loop circle sits 90° to the side of the spoke (internally tangent to boundary).
     let center_ang = if is_q {
@@ -517,32 +498,14 @@ fn generate_shape_grand_loop(
     };
     let loop_center = Vec2::new(r_loop * center_ang.cos(), r_loop * center_ang.sin());
 
-    let p_start = a_sensor_pos(start, boundary_radius);
-    let a_end = a_sensor_pos(end, boundary_radius);
+    let p_start = a_sensor_pos(start, layout);
+    let a_end = a_sensor_pos(end, layout);
 
     let (t_ccw_entry, t_cw_entry) = tangent_points_to_offset_circle(p_start, loop_center, r_loop);
     let tangent_entry = if is_q { t_cw_entry } else { t_ccw_entry };
     let arc_entry_ang = (tangent_entry - loop_center).to_angle();
 
-    let dist = if is_q {
-        cw_distance(start, end)
-    } else {
-        ccw_distance(start, end)
-    };
-    let exit_waypoint = match dist {
-        0 | 1 => {
-            if is_q {
-                a_sensor_pos(button_ccw(start, 1), boundary_radius)
-            } else {
-                a_sensor_pos(button_cw(start, 1), boundary_radius)
-            }
-        }
-        2 | 3 => b_sensor_pos(start, boundary_radius),
-        4 | 5 => Vec2::ZERO,
-        6 => b_sensor_pos(button_ccw(end, 1), boundary_radius),
-        _ => a_end,
-    };
-
+    let exit_waypoint = a_sensor_pos(end, layout);
     let (t_ccw_exit, t_cw_exit) =
         tangent_points_to_offset_circle(exit_waypoint, loop_center, r_loop);
     let tangent_exit = if is_q { t_ccw_exit } else { t_cw_exit };
@@ -591,10 +554,10 @@ fn generate_shape_thunderbolt(
     start: usize,
     end: usize,
     is_z: bool,
-    boundary_radius: f32,
+    layout: &ButtonLayout,
 ) -> Vec<Vec2> {
-    let p_start = a_sensor_pos(start, boundary_radius);
-    let p_end = a_sensor_pos(end, boundary_radius);
+    let p_start = a_sensor_pos(start, layout);
+    let p_end = a_sensor_pos(end, layout);
     let p_center = center_pos();
 
     let b1 = if is_z {
@@ -611,9 +574,9 @@ fn generate_shape_thunderbolt(
     generate_multi_segment_points(
         &[
             p_start,
-            b_sensor_pos(b1, boundary_radius),
+            b_sensor_pos(b1, layout),
             p_center,
-            b_sensor_pos(b3, boundary_radius),
+            b_sensor_pos(b3, layout),
             p_end,
         ],
         35.0,
@@ -622,9 +585,9 @@ fn generate_shape_thunderbolt(
 
 // FAN SHAPE (w): Path to first end only. The spawner creates 3 separate
 // simultaneous slides for end1, end2, end3.
-fn generate_shape_fan(start: usize, end1: usize, boundary_radius: f32) -> Vec<Vec2> {
-    let p_start = a_sensor_pos(start, boundary_radius);
-    let p_end = a_sensor_pos(end1, boundary_radius);
+fn generate_shape_fan(start: usize, end1: usize, layout: &ButtonLayout) -> Vec<Vec2> {
+    let p_start = a_sensor_pos(start, layout);
+    let p_end = a_sensor_pos(end1, layout);
     generate_multi_segment_points(&[p_start, p_end], 35.0)
 }
 
@@ -656,7 +619,6 @@ pub fn generate_arc_points(
 }
 
 /// Generate evenly-spaced points along an arc centered at an arbitrary point.
-#[allow(dead_code)]
 pub fn generate_offset_arc_points(
     center: Vec2,
     start_angle: f32,
@@ -770,14 +732,14 @@ pub fn build_slide_trace(
     start_button: usize,
     note_bpm: f32,
     shared_duration: bool,
-    boundary_radius: f32,
+    layout: &ButtonLayout,
 ) -> SlidePath {
     let mut waypoints: Vec<Vec2> = Vec::new();
     let mut seg_lengths: Vec<f32> = Vec::with_capacity(segments.len());
     let mut current_start = start_button;
 
     for seg in segments {
-        let pts = generate_points(&seg.shape, current_start, boundary_radius);
+        let pts = generate_points(&seg.shape, current_start, layout);
         seg_lengths.push(calculate_total_length(&pts));
         append_path_dedup(&mut waypoints, pts);
         current_start = slide_shape_end(&seg.shape);

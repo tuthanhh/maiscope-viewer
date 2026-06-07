@@ -252,6 +252,25 @@ pub fn build_chevron_path(radius: f32) -> ShapePath {
         .close()
 }
 
+pub fn build_hexagon_path(radius: f32) -> ShapePath {
+    let mut builder = ShapePath::new();
+
+    for i in 0..6 {
+        // 60 degrees in radians (PI / 3)
+        let angle = i as f32 * (PI / 3.0);
+        let point = Vec2::new(angle.cos(), angle.sin()) * radius;
+
+        if i == 0 {
+            builder = builder.move_to(point);
+        } else {
+            builder = builder.line_to(point);
+        }
+    }
+
+    // Closes the hexagon loop
+    builder.close()
+}
+
 // ============================================================================
 // Touch-hold countdown square
 // ============================================================================
@@ -291,6 +310,11 @@ pub fn build_countdown_path(s: f32, fraction: f32) -> ShapePath {
     }
 
     path
+}
+pub fn build_hold_halo_path(radius: f32) -> ShapePath {
+    ShapePath::new()
+        .move_to(Vec2::new(radius, 0.0))
+        .arc(Vec2::ZERO, Vec2::splat(radius), TAU, 0.0)
 }
 
 // ── Shape builders ─────────────────────────────────────────────────────────
@@ -333,12 +357,22 @@ pub(super) fn touch_hold_triangle_shape(assets: &NoteAssets, color: Color) -> Sh
 
 pub(super) fn star_shape(assets: &NoteAssets, color: Color) -> Shape {
     ShapeBuilder::with(&assets.slide_star_path)
-        .fill(color)
+        .stroke((color, NOTE_RADIUS * 0.25))
         .build()
 }
 
 pub(super) fn chevron_shape(assets: &NoteAssets, color: Color) -> Shape {
-    ShapeBuilder::with(&assets.chevron_path)
-        .fill(color)
+    ShapeBuilder::with(&assets.chevron_path).fill(color).build()
+}
+
+pub(super) fn hexagon_shape(assets: &NoteAssets, color: Color) -> Shape {
+    ShapeBuilder::with(&assets.hexagon_path)
+        .stroke((color, super::NOTE_RADIUS * 0.1))
+        .build()
+}
+
+pub(super) fn hold_halo_shape(assets: &NoteAssets, color: Color) -> Shape {
+    ShapeBuilder::with(&assets.hold_halo_path)
+        .stroke((color, super::NOTE_RADIUS * 0.1))
         .build()
 }

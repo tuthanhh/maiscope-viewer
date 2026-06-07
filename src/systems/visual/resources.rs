@@ -23,8 +23,10 @@ impl Default for ButtonLayout {
         let mut e = Vec::new();
         let mut tap_spawn = Vec::new();
         for i in 0..8 {
-            let a1 = std::f32::consts::FRAC_PI_8 + i as f32 * std::f32::consts::FRAC_PI_4;
-            let a2 = i as f32 * std::f32::consts::FRAC_PI_4;
+            let a1 = std::f32::consts::FRAC_PI_2
+                - std::f32::consts::FRAC_PI_8
+                - (i as f32) * std::f32::consts::FRAC_PI_4;
+            let a2 = std::f32::consts::FRAC_PI_2 - (i as f32) * std::f32::consts::FRAC_PI_4;
             tap.push(Vec2::new(1.0 * a1.cos(), 1.0 * a1.sin()));
             a.push(Vec2::new(4.1 / 4.8 * a1.cos(), 4.1 / 4.8 * a1.sin()));
             d.push(Vec2::new(4.1 / 4.8 * a2.cos(), 4.1 / 4.8 * a2.sin()));
@@ -81,6 +83,12 @@ pub struct NoteAssets {
 
     /// TouchHold countdown square (full perimeter placeholder; redrawn at runtime).
     pub countdown_arc_path: ShapePath,
+
+    /// Hexagon after effect for notes (closed polygon, stroked).
+    pub hexagon_path: ShapePath,
+
+    /// Circle halo effect for the hold note
+    pub hold_halo_path: ShapePath,
 }
 
 impl Default for NoteAssets {
@@ -95,7 +103,9 @@ impl Default for NoteAssets {
             touch_triangle_path: shapes::build_touch_triangle_path(radius),
             touch_hold_triangle_path: shapes::build_touch_hold_triangle_path(radius),
             chevron_path: shapes::build_chevron_path(radius),
-            countdown_arc_path: shapes::build_countdown_path(radius * 1.15, 1.0),
+            countdown_arc_path: shapes::build_countdown_path(super::COUNTDOWN_RADIUS, 1.0),
+            hexagon_path: shapes::build_hexagon_path(radius * 0.75),
+            hold_halo_path: shapes::build_hold_halo_path(radius * 0.75),
         }
     }
 }
