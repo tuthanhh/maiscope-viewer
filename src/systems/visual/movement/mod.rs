@@ -1,21 +1,27 @@
+//! Note lifecycle driver. `update_movement` runs every frame and advances each
+//! note through its `NoteTiming` phases (Growing → Moving → Holding/Waiting →
+//! Sliding → Dying), delegating per-element animation to [`animation`].
+
 use super::{RADIUS, component::NoteTiming, resources::ButtonLayout, resources::NoteAssets};
 use crate::systems::{
     MOVING,
     chart_playback::ChartPlayback,
-    component::{Duration, NoteKind},
+    component::NoteKind,
     visual::{
-        NOTE_RADIUS,
         component::{
             HoldHalo, HoldNoteElement, NoteBpm, SlideArrow, SlideElement, SlidePath, TouchElement,
             TouchHoldCountdown,
         },
         note_colors,
-        shapes::{self, hexagon_shape, hold_halo_shape, spark_shape},
+        shapes::{hexagon_shape, hold_halo_shape, spark_shape},
         slide_path,
     },
 };
 use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::*;
+
+mod animation;
+use animation::*;
 
 type TriangleQuery<'w, 's> = Query<
     'w,
@@ -103,34 +109,6 @@ type SlideArrowQuery<'w, 's> = Query<
     ),
 >;
 
-fn duration_to_secs(duration: Duration, bpm: f32) -> f32 {
-    match duration {
-        Duration::Simple { divider, count } => count as f32 / divider as f32 * (240.0 / bpm),
-        Duration::BpmOverride {
-            bpm,
-            divider,
-            count,
-        } => count as f32 / divider as f32 * (240.0 / bpm),
-        Duration::BpmOverrideSeconds { seconds, .. } => seconds,
-        _ => 0.0,
-    }
-}
-
-/// True hold-bar length: how far the note travels during the hold
-/// (`velocity · hold_secs`, where `velocity = travel_dist / move_duration`).
-fn hold_max_tail(travel_dist: f32, speed: f32, duration: Duration, bpm: f32) -> f32 {
-    travel_dist * speed / MOVING as f32 * duration_to_secs(duration, bpm)
-}
-
-fn set_alpha(shape: &mut Shape, a: f32) {
-    if let Some(fill) = shape.fill.as_mut() {
-        fill.color.set_alpha(a);
-    }
-    if let Some(stroke) = shape.stroke.as_mut() {
-        stroke.color.set_alpha(a);
-    }
-}
-
 pub fn update_movement(
     mut commands: Commands,
     mut entity_query: Query<(
@@ -175,10 +153,7 @@ pub fn update_movement(
                 timer.tick(time.delta());
                 let t = timer.fraction();
 
-                if !matches!(
-                    kind,
-                    NoteKind::Slide { .. } | NoteKind::HeadlessSlide { .. }
-                ) {
+                if !is_slide(kind) {
                     transform.scale = Vec3::splat(t);
                 } else {
                     grow_slide(t, children, &mut slide_elements, &mut slide_arrows);
@@ -310,12 +285,7 @@ pub fn update_movement(
             }
             NoteTiming::Dying(timer) => {
                 // On the very first frame: transform into a hexagon
-                if timer.elapsed().is_zero()
-                    && !matches!(
-                        kind,
-                        NoteKind::Slide { .. } | NoteKind::HeadlessSlide { .. }
-                    )
-                {
+                if timer.elapsed().is_zero() && !is_slide(kind) {
                     // Despawn all children (slide stars, hold bodies, touch triangles)
                     // so we only see the hexagon effect
                     if let Some(children) = children {
@@ -362,244 +332,6 @@ pub fn update_movement(
                     commands.entity(entity).despawn();
                 }
             }
-        }
-    }
-}
-fn grow_slide(
-    t: f32,
-    children: Option<&Children>,
-    slide_elements: &mut SlideElementQuery,
-    slide_arrows: &mut SlideArrowQuery,
-) {
-    let Some(children) = children else { return };
-    for child in children.iter() {
-        if let Ok((mut transform, el, _, _)) = slide_elements.get_mut(child) {
-            if matches!(*el, SlideElement::Head) {
-                transform.scale = Vec3::splat(t);
-            }
-        }
-        if let Ok((mut shape, _)) = slide_arrows.get_mut(child) {
-            set_alpha(&mut shape, t);
-        }
-    }
-}
-
-// Moving phase
-fn move_tap(transform: &mut Transform, kind: &NoteKind, t: f32, layout: &ButtonLayout) {
-    if let NoteKind::Tap(id) | NoteKind::SlideStar(id) = kind {
-        let spawn = layout.tap_spawn[id - 1] * RADIUS;
-        let hit = layout.tap[id - 1] * RADIUS;
-        transform.translation = spawn.lerp(hit, t).extend(2.0);
-    }
-}
-// Moving phase
-fn move_taphold(
-    kind: &NoteKind,
-    t: f32,
-    bpm: f32,
-    speed: f32,
-    children: Option<&Children>,
-    transform: &mut Transform,
-    hold_elements: &mut HoldElementQuery,
-    layout: &ButtonLayout,
-) {
-    let NoteKind::TapHold { button, duration } = kind else {
-        return;
-    };
-
-    let Some(children) = children else { return };
-
-    let spawn = layout.tap_spawn[button - 1] * RADIUS;
-    let hit = layout.tap[button - 1] * RADIUS;
-    transform.translation = spawn.lerp(hit, t).extend(2.0);
-
-    let travel_dist = spawn.distance(hit);
-    let max_tail = hold_max_tail(travel_dist, speed, *duration, bpm);
-    let current_length = (travel_dist * t).min(max_tail);
-
-    for child in children.iter() {
-        if let Ok((mut tf, el)) = hold_elements.get_mut(child) {
-            match el {
-                HoldNoteElement::Body => {
-                    tf.scale.y = current_length;
-                    tf.translation.y = -current_length / 2.0;
-                }
-                HoldNoteElement::Tail => {
-                    tf.translation.y = -current_length;
-                }
-                HoldNoteElement::Head => {}
-            }
-        }
-    }
-}
-
-fn move_slide(
-    t: f32,
-    kind: &NoteKind,
-    children: Option<&Children>,
-    slide_elements: &mut SlideElementQuery,
-    layout: &ButtonLayout,
-) {
-    let Some(children) = children else { return };
-    for child in children.iter() {
-        if let Ok((mut transform, el, _, _)) = slide_elements.get_mut(child) {
-            if matches!(*el, SlideElement::Head) {
-                if let NoteKind::Slide {
-                    head_button: id, ..
-                } = kind
-                {
-                    // Land on the outer rim, coinciding with the path start.
-                    let spawn = layout.tap_spawn[id - 1] * RADIUS;
-                    let hit = layout.tap[id - 1] * RADIUS;
-                    transform.translation = spawn.lerp(hit, t).extend(2.0);
-                }
-            }
-        }
-    }
-}
-
-fn hide_slide_head(children: Option<&Children>, slide_elements: &mut SlideElementQuery) {
-    let Some(children) = children else { return };
-    for child in children.iter() {
-        if let Ok((_t, el, mut vis, _s)) = slide_elements.get_mut(child) {
-            if matches!(*el, SlideElement::Head) {
-                *vis = Visibility::Hidden;
-            }
-        }
-    }
-}
-
-// Waiting phase: the trace star fades in, stationary at the path start.
-fn wait_slide(t: f32, children: Option<&Children>, slide_elements: &mut SlideElementQuery) {
-    let Some(children) = children else { return };
-    for child in children.iter() {
-        if let Ok((_t, el, mut vis, mut shape)) = slide_elements.get_mut(child) {
-            if matches!(*el, SlideElement::TraceStar) {
-                *vis = Visibility::Visible;
-                set_alpha(&mut shape, t);
-            }
-        }
-    }
-}
-
-// Sliding phase: the trace star walks the path; chevrons it passes are removed.
-fn slide_trace(
-    elapsed: f32,
-    path: &SlidePath,
-    children: Option<&Children>,
-    slide_elements: &mut SlideElementQuery,
-    slide_arrows: &mut SlideArrowQuery,
-    commands: &mut Commands,
-) {
-    let Some(children) = children else { return };
-    let dist = slide_path::trace_distance(path, elapsed);
-    let (pos, _angle) = slide_path::get_transform_at_distance(&path.waypoints, dist);
-    for child in children.iter() {
-        if let Ok((mut transform, el, mut vis, mut shape)) = slide_elements.get_mut(child) {
-            if matches!(*el, SlideElement::TraceStar) {
-                *vis = Visibility::Visible;
-                set_alpha(&mut shape, 1.0);
-                transform.translation = pos.extend(3.0);
-            }
-        }
-        if let Ok((_s, arrow)) = slide_arrows.get_mut(child) {
-            if arrow.distance_along_path <= dist {
-                commands.entity(child).despawn();
-            }
-        }
-    }
-}
-fn move_triangles(
-    kind: &NoteKind,
-    t: f32,
-    children: Option<&Children>,
-    triangles: &mut TriangleQuery,
-) {
-    if !matches!(kind, NoteKind::Touch { .. } | NoteKind::TouchHold { .. }) {
-        return;
-    }
-    let Some(children) = children else { return };
-    let current_dist = shapes::touch_triangle_start_distance(NOTE_RADIUS) * (1.0 - t);
-    for child in children.iter() {
-        if let Ok((mut tf, element)) = triangles.get_mut(child) {
-            if matches!(element, TouchElement::Triangle) {
-                let dir = tf.translation.truncate().normalize_or_zero();
-                tf.translation = (dir * current_dist).extend(-0.1);
-            }
-        }
-    }
-}
-
-fn hold_tap(
-    kind: &NoteKind,
-    t: f32,
-    timer: &Timer,
-    bpm: f32,
-    speed: f32,
-    children: Option<&Children>,
-    hold_elements: &mut HoldElementQuery,
-    halo_holds: &mut HaloHoldQuery,
-    layout: &ButtonLayout,
-) {
-    let NoteKind::TapHold { button, duration } = kind else {
-        return;
-    };
-    let Some(children) = children else { return };
-
-    let spawn = layout.tap_spawn[button - 1] * RADIUS;
-    let hit = layout.tap[button - 1] * RADIUS;
-
-    let travel_dist = spawn.distance(hit);
-    let max_tail = hold_max_tail(travel_dist, speed, *duration, bpm);
-    let current_length = (max_tail * (1.0 - t)).min(travel_dist);
-
-    for child in children.iter() {
-        if let Ok((mut tf, el)) = hold_elements.get_mut(child) {
-            match el {
-                HoldNoteElement::Body => {
-                    tf.scale.y = current_length;
-                    tf.translation.y = -current_length / 2.0;
-                }
-                HoldNoteElement::Tail => {
-                    tf.translation.y = -current_length;
-                }
-                HoldNoteElement::Head => {}
-            }
-        }
-        if let Ok((mut shape, mut transform, _)) = halo_holds.get_mut(child) {
-            // Halo pulse: a 0.25s sawtooth that repeats for the whole hold —
-            // scale ramps 0.75 -> 1.75 and alpha 0.3 -> 0.5, then snaps back.
-            let cycle = (timer.elapsed_secs() % 0.25) / 0.25;
-            transform.scale = Vec3::splat(0.75 + cycle); // 0.75 -> 1.75
-            set_alpha(&mut shape, 0.3 + cycle * 0.2); // 0.3 -> 0.5
-        }
-    }
-}
-
-fn hold_touch(
-    t: f32,
-    timer: &Timer,
-    children: Option<&Children>,
-    countdown_query: &mut CountdownQuery,
-    halo_holds: &mut HaloHoldQuery,
-) {
-    let Some(children) = children else { return };
-    for child in children.iter() {
-        if let Ok((mut arc_shape, mut vis, countdown)) = countdown_query.get_mut(child) {
-            *vis = Visibility::Visible;
-            let r = countdown.arc_radius;
-            let new_path = shapes::build_countdown_path(r, t);
-            arc_shape.path = ShapeBuilder::with(&new_path)
-                .stroke((note_colors::RING, NOTE_RADIUS * 0.18))
-                .build()
-                .path;
-        }
-        if let Ok((mut shape, mut transform, _)) = halo_holds.get_mut(child) {
-            // Halo pulse: a 0.25s sawtooth that repeats for the whole hold —
-            // scale ramps 0.75 -> 1.75 and alpha 0.3 -> 0.5, then snaps back.
-            let cycle = (timer.elapsed_secs() % 0.25) / 0.25;
-            transform.scale = Vec3::splat(0.75 + cycle); // 0.75 -> 1.75
-            set_alpha(&mut shape, 0.3 + cycle * 0.2); // 0.3 -> 0.5
         }
     }
 }
