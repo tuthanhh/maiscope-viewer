@@ -204,7 +204,9 @@ fn build_slide_shape(
     target_digits: &str,
 ) -> Result<(SlideShape, usize), String> {
     match shape_str {
-        "V" => {
+        // Both `V` and `v` are grand-V with two digits (mid+end); a single
+        // digit is the simple V through the center.
+        "V" | "v" => {
             if target_digits.len() == 2 {
                 let mid_btn = target_digits[0..1]
                     .parse::<usize>()
@@ -234,10 +236,6 @@ fn build_slide_shape(
         "^" => {
             let e = parse_end_button(target_digits, "arc")?;
             Ok((SlideShape::ShortArc { end: e }, e))
-        }
-        "v" => {
-            let e = parse_end_button(target_digits, "v")?;
-            Ok((SlideShape::VShape { end: e }, e))
         }
         "<" => {
             let e = parse_end_button(target_digits, "CCW arc")?;

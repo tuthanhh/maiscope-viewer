@@ -15,7 +15,7 @@ static SLIDE_PATTERN_RE: LazyLock<Regex> =
 static TAP_TOUCH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?x)
-            ^([A-E][1-8]|[1-8]|[1-8][1-8]|C|E)  # Button or touch location
+            ^([A-Ea-e][1-8]|[1-8]|[1-8][1-8]|[CEce])  # Button or touch location (zones case-insensitive)
             ([xhfb]*)                            # Modifiers
             (?:\[(\d+):(\d+)\])?                 # Optional hold duration
             ([xhfb]*)                            # Optional modifiers after duration

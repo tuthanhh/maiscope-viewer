@@ -10,7 +10,7 @@ use crate::systems::{
             TouchHoldCountdown,
         },
         note_colors,
-        shapes::{self, hexagon_shape, hold_halo_shape},
+        shapes::{self, hexagon_shape, hold_halo_shape, spark_shape},
         slide_path,
     },
 };
@@ -226,6 +226,17 @@ pub fn update_movement(
                         }
                         NoteKind::Slide { .. } | NoteKind::HeadlessSlide { .. } => {
                             hide_slide_head(children, &mut slide_elements);
+                            // Pop effect where the head star lands on the ring.
+                            if let NoteKind::Slide { head_button, .. } = kind {
+                                let pos = layout.tap[head_button - 1] * RADIUS;
+                                commands.spawn((
+                                    hexagon_shape(&assets, note_colors::HEXAGON),
+                                    Transform::from_translation(pos.extend(2.5)),
+                                    Visibility::Visible,
+                                    NoteKind::Tap(*head_button),
+                                    NoteTiming::Dying(Timer::from_seconds(0.25, TimerMode::Once)),
+                                ));
+                            }
                             let wait = slide_path_data.map(|p| p.wait_secs).unwrap_or(0.0);
                             *timing =
                                 NoteTiming::Waiting(Timer::from_seconds(wait, TimerMode::Once));
@@ -292,12 +303,19 @@ pub fn update_movement(
                     );
                 }
                 if timer.just_finished() {
-                    *timing = NoteTiming::Dying(Timer::from_seconds(0.25, TimerMode::Once));
+                    // Slides have no death visual (shapeless container), so Dying
+                    // just despawns children + self on its first frame.
+                    *timing = NoteTiming::Dying(Timer::from_seconds(0.0, TimerMode::Once));
                 }
             }
             NoteTiming::Dying(timer) => {
                 // On the very first frame: transform into a hexagon
-                if timer.elapsed().is_zero() {
+                if timer.elapsed().is_zero()
+                    && !matches!(
+                        kind,
+                        NoteKind::Slide { .. } | NoteKind::HeadlessSlide { .. }
+                    )
+                {
                     // Despawn all children (slide stars, hold bodies, touch triangles)
                     // so we only see the hexagon effect
                     if let Some(children) = children {
@@ -305,10 +323,14 @@ pub fn update_movement(
                             commands.entity(child).despawn();
                         }
                     }
-                    // Swap the note's shape path to a hexagon
+                    // Touch sparks with a cluster of small stars; everything else
+                    // (incl. TouchHold) pops a hexagon.
                     if let Some(shape) = shape.as_deref_mut() {
-                        *shape = hexagon_shape(&assets, note_colors::HEXAGON);
-                        // handle the touch effect later.
+                        *shape = if matches!(kind, NoteKind::Touch { .. }) {
+                            spark_shape(&assets, note_colors::TOUCH)
+                        } else {
+                            hexagon_shape(&assets, note_colors::HEXAGON)
+                        };
                     } else {
                         if matches!(kind, NoteKind::TouchHold { .. } | NoteKind::TapHold { .. }) {
                             commands
