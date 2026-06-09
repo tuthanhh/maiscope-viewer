@@ -111,6 +111,6 @@ impl ChartPlayback {
 
 pub(super) fn prepare_chart(mut playback: ResMut<ChartPlayback>) {
     playback.compute_timestamps(
-        parser::parse_chart(Path::new("assets/songs/ANU/maidata.txt")).unwrap(),
+        parser::parse_chart(Path::new("assets/songs/Break The Speakers/maidata.txt")).unwrap(),
     );
 }

@@ -2,13 +2,14 @@ use super::{
     NOTE_RADIUS,
     component::{
         FanLanes, HoldNoteElement, NoteBpm, NoteTiming, SlideArrow, SlideElement, TouchElement,
-        TouchHoldCountdown,
+        TouchHoldCountdown, TouchSpark,
     },
     note_colors,
     resources::{ButtonLayout, NoteAssets},
     shapes::{
-        chevron_shape, hold_arch_shape, hold_body_shape, star_shape, tap_shape, touch_circle_shape,
-        touch_hold_triangle_shape, touch_triangle_shape, touch_triangle_start_distance,
+        chevron_shape, hold_arch_shape, hold_body_shape, hold_halo_shape, star_shape, tap_shape,
+        touch_circle_shape, touch_hold_triangle_shape, touch_triangle_shape,
+        touch_triangle_start_distance,
     },
     slide_path,
 };
@@ -20,6 +21,7 @@ use crate::systems::{
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::relationship::RelatedSpawnerCommands;
 use bevy::prelude::*;
+use bevy_kira_audio::prelude::*;
 use bevy_prototype_lyon::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
 
@@ -41,15 +43,23 @@ fn slide_color(is_paired: bool) -> Color {
 pub fn next_event(
     mut commands: Commands,
     mut chart: ResMut<ChartPlayback>,
-    time: Res<Time>,
     note_assets: Res<NoteAssets>,
     layout: Res<ButtonLayout>,
+    bgm_channel: Res<AudioChannel<crate::systems::audio::Bgm>>,
+    bgm_instance: Res<crate::systems::audio::BgmInstance>,
 ) {
     if !chart.is_playing {
         return;
     }
 
-    chart.elapsed_time += time.delta_secs_f64() * chart.chart_speed as f64;
+    // Anchor the chart clock to the music: the BGM playback position is the
+    // single source of truth, so the chart can never drift from the audio.
+    // Skip frames where the BGM has no position yet (still queued / not started)
+    // so notes never spawn before the music begins.
+    let Some(pos) = bgm_channel.state(&bgm_instance.0).position() else {
+        return;
+    };
+    chart.elapsed_time = pos;
 
     // .map() clones event data and releases the &mut borrow on chart,
     // so chart.chart_speed / chart.note_speed are accessible in the loop body.
@@ -256,6 +266,41 @@ fn spawn_touch_hold_countdown(parent: &mut RelatedSpawnerCommands<ChildOf>, asse
         Visibility::Hidden,
         TouchHoldCountdown { arc_radius },
     ));
+}
+
+/// Touch death burst: an expanding halo, 8 stars that converge inward, and 4
+/// stars that burst outward. All animated from the parent's `Dying` timer in
+/// `animate_touch_spark`.
+pub(super) fn spawn_touch_spark(parent: &mut RelatedSpawnerCommands<ChildOf>, assets: &NoteAssets) {
+    let color = note_colors::TOUCH;
+
+    // Halo: expanding, fading ring centred on the note.
+    parent.spawn((
+        hold_halo_shape(assets, color),
+        Transform::from_xyz(0.0, 0.0, 1.0),
+        TouchSpark::Halo,
+    ));
+
+    // 8 stars converging inward, evenly spaced.
+    for i in 0..8 {
+        let angle = i as f32 * (PI / 4.0);
+        let pos = Vec2::new(angle.cos(), angle.sin()) * super::SPARK_STAR_RADIUS;
+        parent.spawn((
+            star_shape(assets, color),
+            Transform::from_translation(pos.extend(2.0)).with_scale(Vec3::splat(super::SPARK_STAR_SCALE)),
+            TouchSpark::StarIn(angle),
+        ));
+    }
+
+    // 4 stars bursting outward, offset 45° to emerge between the converged points.
+    for i in 0..4 {
+        let angle = FRAC_PI_2 / 2.0 + i as f32 * FRAC_PI_2;
+        parent.spawn((
+            star_shape(assets, color),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 2.0)).with_scale(Vec3::splat(super::SPARK_STAR_SCALE)),
+            TouchSpark::StarOut(angle),
+        ));
+    }
 }
 
 fn spawn_approach_triangles(

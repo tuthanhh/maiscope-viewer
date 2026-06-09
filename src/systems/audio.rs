@@ -18,17 +18,34 @@ pub struct GameAudioAssets {
     pub guide_tap: Handle<AudioSource>,
 }
 
+/// Handle to the currently-playing BGM instance. Queried each frame to anchor
+/// the chart clock to the music's actual playback position.
+#[derive(Resource)]
+pub struct BgmInstance(pub Handle<AudioInstance>);
+
 pub fn load_audio_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(GameAudioAssets {
-        bgm: asset_server.load("songs/ANU/track.mp3"),
+        bgm: asset_server.load("songs/Break The Speakers/track.mp3"),
         guide_tap: asset_server.load("system_sounds/SE_GAME_ANSWER_.wav"),
     });
 }
 
-pub fn start_bgm(bgm_channel: Res<AudioChannel<Bgm>>, audio_assets: Res<GameAudioAssets>) {
+pub fn start_bgm(
+    mut commands: Commands,
+    bgm_channel: Res<AudioChannel<Bgm>>,
+    audio_assets: Res<GameAudioAssets>,
+) {
     // We play the BGM and usually lower the volume slightly
     // so the guide sounds and hit SFX can punch through clearly.
-    bgm_channel.play(audio_assets.bgm.clone()).with_volume(0.4);
+    // The instance handle is stored so the chart clock can read the playback
+    // position and stay in sync with the music.
+    // NOTE: if chart_speed != 1.0 is ever supported, also call
+    // `.with_playback_rate(chart_speed as f64)` here to keep audio in step.
+    let handle = bgm_channel
+        .play(audio_assets.bgm.clone())
+        .with_volume(0.4)
+        .handle();
+    commands.insert_resource(BgmInstance(handle));
 }
 
 pub fn handle_guide_sounds(

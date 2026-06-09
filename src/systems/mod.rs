@@ -50,18 +50,17 @@ pub fn register_systems(app: &mut App) {
         .add_systems(Startup, chart_playback::prepare_chart)
         .add_systems(
             Startup,
-            (
-                visual::spawn_judgement_ring,
-                audio::load_audio_assets,
-                audio::start_bgm.after(audio::load_audio_assets),
-            ),
+            (visual::spawn_judgement_ring, audio::load_audio_assets),
         )
+        .add_systems(Update, check_if_ready.run_if(in_state(AppState::Loading)))
+        .add_systems(OnEnter(AppState::Playing), audio::start_bgm)
         .add_systems(
             Update,
             (
                 visual::next_event,
                 visual::update_movement,
                 audio::handle_guide_sounds,
-            ),
+            )
+                .run_if(in_state(AppState::Playing)),
         );
 }
