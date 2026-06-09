@@ -1,6 +1,3 @@
-use std::path::Path;
-
-use crate::systems::chart_playback::ChartPlayback;
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 
@@ -14,10 +11,31 @@ const GROWING: f64 = 1.5;
 const MOVING: f64 = 2.0;
 const DEFAULT_BPM: f64 = 240.0;
 
-fn prepare_chart(mut playback: ResMut<ChartPlayback>) {
-    playback.compute_timestamps(
-        parser::parse_chart(Path::new("assets/songs/the EmpErroR/maidata.txt")).unwrap(),
-    );
+#[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
+pub enum AppState {
+    #[default]
+    Loading,
+    Playing,
+}
+
+fn check_if_ready(
+    asset_server: Res<AssetServer>,
+    note_assets: Res<audio::GameAudioAssets>,
+    playback: Res<chart_playback::ChartPlayback>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    // Example: Check if a specific handle inside your resource is loaded.
+    // Replace `bgm_handle` with whatever field stores your loaded audio handle.
+    let is_bgm_loaded = asset_server.is_loaded_with_dependencies(&note_assets.bgm);
+    let is_sfx_loaded = asset_server.is_loaded_with_dependencies(&note_assets.guide_tap);
+    let is_chart_ready = !playback.timed_events.is_empty();
+
+    // You can check multiple things here (e.g., textures, charts)
+    if is_bgm_loaded && is_sfx_loaded && is_chart_ready {
+        // Everything is ready! Transition to the Playing state.
+        // This will trigger OnEnter(AppState::Playing) on the next frame.
+        next_state.set(AppState::Playing);
+    }
 }
 
 pub fn register_systems(app: &mut App) {
@@ -25,10 +43,11 @@ pub fn register_systems(app: &mut App) {
     app.init_resource::<visual::resources::ButtonLayout>()
         .init_resource::<visual::resources::NoteAssets>()
         .init_resource::<chart_playback::ChartPlayback>()
+        .init_state::<AppState>()
         .add_message::<audio::PlayGuideSoundMessage>() // Register the event
         .add_audio_channel::<audio::Bgm>() // Register Background channel
         .add_audio_channel::<audio::Sfx>() // Register Sound Effects channel
-        .add_systems(Startup, prepare_chart)
+        .add_systems(Startup, chart_playback::prepare_chart)
         .add_systems(
             Startup,
             (

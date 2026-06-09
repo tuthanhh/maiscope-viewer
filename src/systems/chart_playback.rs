@@ -1,6 +1,8 @@
 use super::component::{ChartEvent, TimedEvent};
 use super::{DEFAULT_BPM, GROWING, MOVING};
+use crate::systems::parser;
 use bevy::prelude::*;
+use std::path::Path;
 
 #[derive(Resource)]
 #[allow(dead_code)]
@@ -105,4 +107,10 @@ impl ChartPlayback {
             None
         }
     }
+}
+
+pub(super) fn prepare_chart(mut playback: ResMut<ChartPlayback>) {
+    playback.compute_timestamps(
+        parser::parse_chart(Path::new("assets/songs/ANU/maidata.txt")).unwrap(),
+    );
 }

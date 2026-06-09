@@ -324,27 +324,47 @@ fn spawn_slide_children(
         SlideElement::TraceStar(0),
     ));
 
-    // Chevron arrows spaced along the path, each rotated to face the travel
-    // direction. Their alpha fades in during Growing; each is removed as the
-    // trace star passes it during Sliding.
-    let mut d = super::CHEVRON_SPACING;
-    while d < path.total_length {
-        let (pos, angle) = slide_path::get_transform_at_distance(&path.waypoints, d);
+    // Chevron arrows of constant size along the path.
+    spawn_chevron_line(
+        parent,
+        &path.waypoints,
+        path.total_length,
+        0,
+        super::CHEVRON_SPACING,
+        assets,
+        color,
+        |_| NOTE_RADIUS,
+    );
+}
+
+/// Place chevrons along `lane` every `spacing` units, each rotated to the travel
+/// direction and spawned transparent (faded in during Growing; consumed during
+/// Sliding). `radius_at(f)` gives the chevron wing-radius at fraction `f∈[0,1)`
+/// along the lane — constant for ordinary slides, growing for the fan cone.
+#[allow(clippy::too_many_arguments)]
+fn spawn_chevron_line(
+    parent: &mut RelatedSpawnerCommands<ChildOf>,
+    lane: &[Vec2],
+    length: f32,
+    lane_idx: usize,
+    spacing: f32,
+    assets: &NoteAssets,
+    color: Color,
+    radius_at: impl Fn(f32) -> f32,
+) {
+    let mut d = spacing;
+    while d < length {
+        let (pos, angle) = slide_path::get_transform_at_distance(lane, d);
         parent.spawn((
-            chevron_shape(
-                assets,
-                color.with_alpha(0.0),
-                NOTE_RADIUS,
-                0.5 * NOTE_RADIUS,
-            ),
+            chevron_shape(assets, color.with_alpha(0.0), radius_at(d / length), 0.5 * NOTE_RADIUS),
             Transform::from_translation(pos.extend(1.0))
                 .with_rotation(Quat::from_rotation_z(angle)),
             SlideArrow {
                 distance_along_path: d,
-                lane: 0,
+                lane: lane_idx,
             },
         ));
-        d += super::CHEVRON_SPACING;
+        d += spacing;
     }
 }
 
@@ -382,33 +402,19 @@ fn spawn_fan_children(
         ));
     }
 
-    // A single widening column of chevrons along the central lane (→ e, the
-    // bisector of the two neighbours): each chevron is wider than the last so
-    // the column spreads into a cone. Chevrons consume against lane 0's length.
-    let central = &lanes[0];
-    let length = lengths[0];
-    let mut d = 1.5 * super::CHEVRON_SPACING;
+    // A single widening cone of chevrons along the central lane (→ e, the
+    // bisector of the two neighbours): wing-radius grows base → max with
+    // distance while thickness/angle stay fixed. Consumes against lane 0.
     let base_radius = NOTE_RADIUS;
     let max_radius = 7.5 * NOTE_RADIUS;
-    while d < length {
-        let (pos, angle) = slide_path::get_transform_at_distance(central, d);
-        let f = d / length;
-        // x = forward (tip length), y = lateral (column width — grows strongly).
-
-        parent.spawn((
-            chevron_shape(
-                assets,
-                color.with_alpha(0.0),
-                base_radius + f * (max_radius - base_radius),
-                0.5 * NOTE_RADIUS,
-            ),
-            Transform::from_translation(pos.extend(1.0))
-                .with_rotation(Quat::from_rotation_z(angle)),
-            SlideArrow {
-                distance_along_path: d,
-                lane: 0,
-            },
-        ));
-        d += 1.5 * super::CHEVRON_SPACING;
-    }
+    spawn_chevron_line(
+        parent,
+        &lanes[0],
+        lengths[0],
+        0,
+        1.5 * super::CHEVRON_SPACING,
+        assets,
+        color,
+        |f| base_radius + f * (max_radius - base_radius),
+    );
 }

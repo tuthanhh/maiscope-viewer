@@ -20,17 +20,17 @@ pub struct GameAudioAssets {
 
 pub fn load_audio_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(GameAudioAssets {
-        bgm: asset_server.load("songs/the EmpErroR/track.mp3"),
+        bgm: asset_server.load("songs/ANU/track.mp3"),
         guide_tap: asset_server.load("system_sounds/SE_GAME_ANSWER_.wav"),
     });
 }
-// In systems/audio.rs
 
 pub fn start_bgm(bgm_channel: Res<AudioChannel<Bgm>>, audio_assets: Res<GameAudioAssets>) {
     // We play the BGM and usually lower the volume slightly
     // so the guide sounds and hit SFX can punch through clearly.
-    bgm_channel.play(audio_assets.bgm.clone()).with_volume(0.8);
+    bgm_channel.play(audio_assets.bgm.clone()).with_volume(0.4);
 }
+
 pub fn handle_guide_sounds(
     // 2. Use MessageReader
     mut messages: MessageReader<PlayGuideSoundMessage>,
@@ -41,7 +41,7 @@ pub fn handle_guide_sounds(
 
     if hit_count > 0 {
         let volume_multiplier: f32 = 1.0 + (hit_count as f32 - 1.0) * 0.1;
-        let final_volume: f32 = (1.0 * volume_multiplier).min(1.5);
+        let final_volume: f32 = (2.0 * volume_multiplier).min(1.5);
 
         sfx_channel
             .play(audio_assets.guide_tap.clone())

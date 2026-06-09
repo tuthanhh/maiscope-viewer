@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bevy = { version = "0.18.1", default-features = false, features = [
+    "bevy_state",          # Required for state transition.
     "bevy_asset",          # Required to load your charts and audio
     "bevy_winit",          # Required for window creation
     "bevy_core_pipeline",  # Required for basic rendering
