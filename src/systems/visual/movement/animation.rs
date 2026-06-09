@@ -9,8 +9,8 @@ use crate::systems::{
     MOVING,
     component::{Duration, NoteKind},
     visual::{
-        NOTE_RADIUS, RADIUS,
-        component::{FanLanes, HoldNoteElement, SlideElement, SlidePath, TouchElement},
+        NOTE_RADIUS, RADIUS, SPARK_STAR_RADIUS,
+        component::{FanLanes, HoldNoteElement, SlideElement, SlidePath, TouchElement, TouchSpark},
         note_colors,
         resources::ButtonLayout,
         shapes, slide_path,
@@ -19,7 +19,7 @@ use crate::systems::{
 
 use super::{
     CountdownQuery, HaloHoldQuery, HoldElementQuery, SlideArrowQuery, SlideElementQuery,
-    TriangleQuery,
+    TouchSparkQuery, TriangleQuery,
 };
 
 // ── Small shared helpers ─────────────────────────────────────────────────────
@@ -196,6 +196,44 @@ pub(super) fn move_triangles(
             if matches!(element, TouchElement::Triangle) {
                 let dir = tf.translation.truncate().normalize_or_zero();
                 tf.translation = (dir * current_dist).extend(-0.1);
+            }
+        }
+    }
+}
+
+// ── Touch death burst ────────────────────────────────────────────────────────
+
+/// Touch death burst, driven by the parent `Dying` fraction `t`:
+/// the halo expands and fades across the whole effect; 8 stars converge to the
+/// center in the first sub-phase; 4 stars burst outward in the second.
+pub(super) fn animate_touch_spark(
+    t: f32,
+    children: Option<&Children>,
+    sparks: &mut TouchSparkQuery,
+) {
+    let Some(children) = children else { return };
+    for child in children.iter() {
+        let Ok((mut transform, mut shape, spark)) = sparks.get_mut(child) else {
+            continue;
+        };
+        match *spark {
+            TouchSpark::Halo => {
+                transform.scale = Vec3::splat(0.4 + t * 1.0); // 0.4 -> 2.2
+                set_alpha(&mut shape, 1.0 - t);
+            }
+            TouchSpark::StarIn(angle) => {
+                let f = (t / 0.55).min(1.0);
+                let r = SPARK_STAR_RADIUS * (1.0 - f);
+                let pos = Vec2::new(angle.cos(), angle.sin()) * r;
+                transform.translation = pos.extend(2.0);
+                set_alpha(&mut shape, 1.0 - f);
+            }
+            TouchSpark::StarOut(angle) => {
+                let f = ((t - 0.45) / 0.55).clamp(0.0, 1.0);
+                let r = SPARK_STAR_RADIUS * f;
+                let pos = Vec2::new(angle.cos(), angle.sin()) * r;
+                transform.translation = pos.extend(2.0);
+                set_alpha(&mut shape, (f * std::f32::consts::PI).sin()); // fade in then out
             }
         }
     }

@@ -89,9 +89,6 @@ pub struct NoteAssets {
 
     /// Circle halo effect for the hold note
     pub hold_halo_path: ShapePath,
-
-    /// Cluster of small stars — touch note after effect.
-    pub spark_path: ShapePath,
 }
 
 impl Default for NoteAssets {
@@ -109,7 +106,6 @@ impl Default for NoteAssets {
             countdown_arc_path: shapes::build_countdown_path(super::COUNTDOWN_RADIUS, 1.0),
             hexagon_path: shapes::build_hexagon_path(radius * 0.75),
             hold_halo_path: shapes::build_hold_halo_path(radius * 0.75),
-            spark_path: shapes::build_spark_path(radius * 0.5),
         }
     }
 }

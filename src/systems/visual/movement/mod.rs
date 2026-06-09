@@ -10,13 +10,14 @@ use crate::systems::{
     visual::{
         component::{
             FanLanes, HoldHalo, HoldNoteElement, NoteBpm, SlideArrow, SlideElement, SlidePath,
-            TouchElement, TouchHoldCountdown,
+            TouchElement, TouchHoldCountdown, TouchSpark,
         },
         note_colors,
-        shapes::{hexagon_shape, hold_halo_shape, spark_shape},
+        shapes::{hexagon_shape, hold_halo_shape},
         slide_path,
     },
 };
+use super::spawning::spawn_touch_spark;
 use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::*;
 
@@ -109,6 +110,26 @@ type SlideArrowQuery<'w, 's> = Query<
         Without<HoldNoteElement>,
     ),
 >;
+// Disjoint from every other query above: each requires a unique marker that the
+// spark children lack, so excluding all of them proves no aliasing.
+type TouchSparkQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Transform,
+        &'static mut Shape,
+        &'static TouchSpark,
+    ),
+    (
+        Without<NoteTiming>,
+        Without<TouchElement>,
+        Without<HoldNoteElement>,
+        Without<HoldHalo>,
+        Without<TouchHoldCountdown>,
+        Without<SlideElement>,
+        Without<SlideArrow>,
+    ),
+>;
 
 pub fn update_movement(
     mut commands: Commands,
@@ -130,6 +151,7 @@ pub fn update_movement(
     mut slide_elements: SlideElementQuery,
     mut slide_arrows: SlideArrowQuery,
     mut halo_holds: HaloHoldQuery,
+    mut touch_sparks: TouchSparkQuery,
     chart: Res<ChartPlayback>,
     layout: Res<ButtonLayout>,
     time: Res<Time>,
@@ -192,7 +214,11 @@ pub fn update_movement(
 
                 if timer.just_finished() {
                     match kind {
-                        NoteKind::Tap(_) | NoteKind::Touch { .. } | NoteKind::SlideStar { .. } => {
+                        // Touch runs a two-sub-phase burst, so it needs a longer timer.
+                        NoteKind::Touch { .. } => {
+                            *timing = NoteTiming::Dying(Timer::from_seconds(0.45, TimerMode::Once));
+                        }
+                        NoteKind::Tap(_) | NoteKind::SlideStar { .. } => {
                             *timing = NoteTiming::Dying(Timer::from_seconds(0.25, TimerMode::Once));
                         }
                         NoteKind::TapHold { duration, .. }
@@ -300,51 +326,50 @@ pub fn update_movement(
                 }
             }
             NoteTiming::Dying(timer) => {
-                // On the very first frame: transform into a hexagon
+                let is_touch = matches!(kind, NoteKind::Touch { .. });
+
+                // On the very first frame: morph into the death effect.
                 if timer.elapsed().is_zero() && !is_slide(kind) {
                     guide_sound_messages.write(PlayGuideSoundMessage);
-                    // Despawn all children (slide stars, hold bodies, touch triangles)
-                    // so we only see the hexagon effect
+                    // Despawn all children (slide stars, hold bodies, touch triangles).
                     if let Some(children) = children {
                         for child in children.iter() {
                             commands.entity(child).despawn();
                         }
                     }
-                    // Touch sparks with a cluster of small stars; everything else
-                    // (incl. TouchHold) pops a hexagon.
-                    if let Some(shape) = shape.as_deref_mut() {
-                        *shape = if matches!(kind, NoteKind::Touch { .. }) {
-                            spark_shape(&assets, note_colors::TOUCH)
-                        } else {
-                            hexagon_shape(&assets, note_colors::HEXAGON)
-                        };
-                    } else {
-                        if matches!(kind, NoteKind::TouchHold { .. } | NoteKind::TapHold { .. }) {
-                            commands
-                                .entity(entity)
-                                .insert(hexagon_shape(&assets, note_colors::HEXAGON));
+                    if is_touch {
+                        // Hide the centre dot; the burst plays out as child entities.
+                        if let Some(shape) = shape.as_deref_mut() {
+                            set_alpha(shape, 0.0);
                         }
+                        commands
+                            .entity(entity)
+                            .with_children(|p| spawn_touch_spark(p, &assets));
+                    } else if let Some(shape) = shape.as_deref_mut() {
+                        *shape = hexagon_shape(&assets, note_colors::HEXAGON);
+                    } else if matches!(kind, NoteKind::TouchHold { .. } | NoteKind::TapHold { .. }) {
+                        commands
+                            .entity(entity)
+                            .insert(hexagon_shape(&assets, note_colors::HEXAGON));
                     }
                 }
 
                 timer.tick(time.delta());
                 let t = timer.fraction();
 
-                // Calculate the wave: goes 0.0 -> 1.0 -> 0.0
-                let wave = (t * std::f32::consts::PI).sin();
-
-                // 1. Increase and Decrease Scale
-                // Base scale is 1.0, expands up to 2.0 at the peak, then shrinks back to 1.0
-                // (Tweak the 1.0 multiplier to make the pop bigger or smaller)
-                transform.scale = Vec3::splat(1.0 + (wave * 1.0));
-
-                // 2. Fade In and Fade Out
-                // Alpha follows the wave exactly (0% -> 100% -> 0%)
-                if let Some(shape) = shape.as_deref_mut() {
-                    set_alpha(shape, wave);
+                if is_touch {
+                    // Burst children are spawned via command, so `children` only
+                    // includes them from the second frame onward.
+                    animate_touch_spark(t, children, &mut touch_sparks);
+                } else {
+                    // Pop: scale 1.0 -> 2.0 -> 1.0, alpha 0% -> 100% -> 0%.
+                    let wave = (t * std::f32::consts::PI).sin();
+                    transform.scale = Vec3::splat(1.0 + wave);
+                    if let Some(shape) = shape.as_deref_mut() {
+                        set_alpha(shape, wave);
+                    }
                 }
 
-                // 3. Final Cleanup
                 if timer.just_finished() {
                     commands.entity(entity).despawn();
                 }

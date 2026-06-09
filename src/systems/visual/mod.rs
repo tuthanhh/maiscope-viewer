@@ -16,6 +16,10 @@ const NOTE_RADIUS: f32 = 35.0;
 const CHEVRON_SPACING: f32 = NOTE_RADIUS * 1.0;
 /// Radius of the TouchHold countdown ring (single source of truth).
 const COUNTDOWN_RADIUS: f32 = NOTE_RADIUS * 1.15;
+/// Outer radius the touch-burst stars travel to/from (shared by spawner + animator).
+const SPARK_STAR_RADIUS: f32 = NOTE_RADIUS * 1.0;
+/// Uniform scale of each small touch-burst star.
+const SPARK_STAR_SCALE: f32 = 0.25;
 
 #[allow(unused)]
 pub mod note_colors {

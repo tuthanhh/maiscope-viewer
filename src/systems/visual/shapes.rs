@@ -199,7 +199,7 @@ pub fn build_touch_triangle_path(radius: f32) -> ShapePath {
     // the visible ring has the same perceived size as the solid touch-hold triangle.
     let r = radius * 1.2;
     let w = r * std::f32::consts::SQRT_2 / 2.0;
-    let t = radius * 0.15;
+    let t = radius * 0.20;
     let sqrt2 = std::f32::consts::SQRT_2;
 
     // Outer contour — clockwise: tip(bottom) → right → left
@@ -276,37 +276,6 @@ pub fn build_hexagon_path(radius: f32) -> ShapePath {
 
     // Closes the hexagon loop
     builder.close()
-}
-
-/// Touch after-effect spark: a cluster of small 5-point stars scattered around
-/// the center, each traced as a separate contour in one path. Tune `star_r`
-/// (per-star size) and `spread` (cluster radius) to taste.
-pub fn build_spark_path(radius: f32) -> ShapePath {
-    let star_r = radius * 0.3;
-    let spread = radius * 0.7;
-    let offsets = [
-        Vec2::ZERO,
-        Vec2::new(0.9, 0.5),
-        Vec2::new(-0.8, 0.6),
-        Vec2::new(0.5, -0.9),
-        Vec2::new(-0.6, -0.7),
-    ];
-    let mut path = ShapePath::new();
-    for off in offsets {
-        let c = off * spread;
-        for i in 0..10 {
-            let ang = PI / 2.0 + i as f32 * PI / 5.0;
-            let r = if i % 2 == 0 { star_r } else { star_r * 0.4 };
-            let p = c + Vec2::new(r * ang.cos(), r * ang.sin());
-            path = if i == 0 {
-                path.move_to(p)
-            } else {
-                path.line_to(p)
-            };
-        }
-        path = path.close();
-    }
-    path
 }
 
 // ============================================================================
@@ -414,10 +383,6 @@ pub(super) fn hexagon_shape(assets: &NoteAssets, color: Color) -> Shape {
     ShapeBuilder::with(&assets.hexagon_path)
         .stroke((color, super::NOTE_RADIUS * 0.1))
         .build()
-}
-
-pub(super) fn spark_shape(assets: &NoteAssets, color: Color) -> Shape {
-    ShapeBuilder::with(&assets.spark_path).fill(color).build()
 }
 
 pub(super) fn hold_halo_shape(assets: &NoteAssets, color: Color) -> Shape {

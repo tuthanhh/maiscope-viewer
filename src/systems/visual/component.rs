@@ -28,6 +28,18 @@ pub enum TouchElement {
     Triangle,
 }
 
+/// One sub-element of the touch-note death burst. Animated from the parent's
+/// `Dying` timer fraction in `update_movement`.
+#[derive(Component)]
+pub enum TouchSpark {
+    /// Expanding, fading ring.
+    Halo,
+    /// Star that converges to center in the first sub-phase. Payload = angle (rad).
+    StarIn(f32),
+    /// Star that bursts outward in the second sub-phase. Payload = angle (rad).
+    StarOut(f32),
+}
+
 #[derive(Component)]
 pub struct TouchHoldCountdown {
     pub arc_radius: f32,
