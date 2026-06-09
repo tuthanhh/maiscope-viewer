@@ -45,9 +45,18 @@ pub struct SlidePath {
 }
 
 /// A chevron arrow sitting at `distance_along_path` units along the slide track.
+/// `lane` is the fan-lane index (0 for ordinary single-lane slides).
 #[derive(Component)]
 pub struct SlideArrow {
     pub distance_along_path: f32,
+    pub lane: usize,
+}
+
+/// The diverging lanes of a fan (`w`) slide: one waypoint list + length per end.
+#[derive(Component)]
+pub struct FanLanes {
+    pub lanes: Vec<Vec<Vec2>>,
+    pub lengths: Vec<f32>,
 }
 
 /// Glowing halo child spawned around a hold head during the Holding phase.
@@ -59,8 +68,9 @@ pub struct HoldHalo;
 pub enum SlideElement {
     /// Initial star-tap that approaches the judgment ring, then vanishes (Slide only).
     Head,
-    /// Star that traces the path during the Sliding phase.
-    TraceStar,
+    /// Star that traces a path during the Sliding phase. The payload is the
+    /// fan-lane index (0 for ordinary single-lane slides).
+    TraceStar(usize),
 }
 
 #[derive(Component)]

@@ -6,6 +6,7 @@ use bevy::math::ops::tan;
 use bevy::prelude::Vec2;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI, TAU};
 
+use super::super::CHEVRON_SPACING;
 use super::super::resources::ButtonLayout;
 use super::geometry::*;
 use crate::systems::component::SlideShape;
@@ -24,7 +25,11 @@ const INNER_RING_FRAC: f32 = 0.382_683_43;
 /// * `shape` - The slide shape to generate
 /// * `start_button` - 1-based button the segment starts from
 /// * `layout` - The button layout providing sensor ring positions/angles
-pub fn generate_points(shape: &SlideShape, start_button: usize, layout: &ButtonLayout) -> Vec<Vec2> {
+pub fn generate_points(
+    shape: &SlideShape,
+    start_button: usize,
+    layout: &ButtonLayout,
+) -> Vec<Vec2> {
     let s = start_button;
     match shape {
         SlideShape::Straight { end } => generate_shape_straight(s, *end, layout),
@@ -79,7 +84,7 @@ fn generate_directional_arc(
     is_clockwise: bool,
     layout: &ButtonLayout,
 ) -> Vec<Vec2> {
-    let spacing = 35.0;
+    let spacing = CHEVRON_SPACING;
     let r = a_ring_radius();
     let start_ang = button_angle(start, layout);
     let end_ang = button_angle(end, layout);
@@ -102,7 +107,12 @@ fn generate_shape_v(start: usize, end: usize, layout: &ButtonLayout) -> Vec<Vec2
 }
 
 // GRAND V-SHAPE (V): start A-sensor → mid A-sensor → end A-sensor.
-fn generate_shape_grand_v(start: usize, end: usize, mid: usize, layout: &ButtonLayout) -> Vec<Vec2> {
+fn generate_shape_grand_v(
+    start: usize,
+    end: usize,
+    mid: usize,
+    layout: &ButtonLayout,
+) -> Vec<Vec2> {
     let p_start = a_sensor_pos(start, layout);
     let p_mid = a_sensor_pos(mid, layout);
     let p_end = a_sensor_pos(end, layout);
@@ -120,7 +130,7 @@ fn generate_shape_inner_loop(
     is_q: bool,
     layout: &ButtonLayout,
 ) -> Vec<Vec2> {
-    let spacing = 35.0;
+    let spacing = CHEVRON_SPACING;
     let r_inner = a_ring_radius() * INNER_RING_FRAC;
 
     let p_start = a_sensor_pos(start, layout);
@@ -165,7 +175,7 @@ fn generate_shape_grand_loop(
     is_q: bool,
     layout: &ButtonLayout,
 ) -> Vec<Vec2> {
-    let spacing = 35.0;
+    let spacing = CHEVRON_SPACING;
     let r_loop = a_ring_radius() * 0.5;
     let start_ang = button_angle(start, layout);
 
@@ -240,7 +250,13 @@ fn generate_shape_thunderbolt(
     let p_end = a_sensor_pos(end, layout);
     let p_center = center_pos();
 
-    let step = |b| if is_z { button_cw(b, 1) } else { button_ccw(b, 1) };
+    let step = |b| {
+        if is_z {
+            button_cw(b, 1)
+        } else {
+            button_ccw(b, 1)
+        }
+    };
     let tip1_anchor = step(end);
     let tip2_anchor = step(start);
 

@@ -1,7 +1,7 @@
 use super::{
     NOTE_RADIUS,
     component::{
-        HoldNoteElement, NoteBpm, NoteTiming, SlideArrow, SlideElement, TouchElement,
+        FanLanes, HoldNoteElement, NoteBpm, NoteTiming, SlideArrow, SlideElement, TouchElement,
         TouchHoldCountdown,
     },
     note_colors,
@@ -15,7 +15,7 @@ use super::{
 use crate::systems::{
     GROWING,
     chart_playback::ChartPlayback,
-    component::{ChartEvent, Note, NoteKind},
+    component::{ChartEvent, Note, NoteKind, SlideShape},
 };
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::relationship::RelatedSpawnerCommands;
@@ -57,7 +57,6 @@ pub fn next_event(
         if let ChartEvent::NoteGroup(notes) = event {
             let is_paired = notes.len() >= 2;
             for note in &notes {
-                println!("Spawning note: {note:?} (paired: {is_paired})");
                 spawn_note(
                     &mut commands,
                     note,
@@ -176,11 +175,36 @@ fn spawn_note(
             let color = slide_color(is_paired);
             let head = *head_button;
 
+            // Fan (`w`): a single FanShape segment fans into 3 diverging lanes,
+            // each with its own growing chevrons and trace star.
+            let fan_ends = match segments.as_slice() {
+                [seg] => match seg.shape {
+                    SlideShape::FanShape { ends } => Some(ends),
+                    _ => None,
+                },
+                _ => None,
+            };
+
             e.insert((Transform::default(), Visibility::Visible));
-            e.with_children(|p| {
-                spawn_slide_children(p, &path, has_head, head, layout, assets, color);
-            });
-            e.insert(path);
+            if let Some((e1, e2, e3)) = fan_ends {
+                let mut lanes = Vec::with_capacity(3);
+                let mut lengths = Vec::with_capacity(3);
+                for end in [e1, e2, e3] {
+                    let pts =
+                        slide_path::generate_points(&SlideShape::Straight { end }, head, layout);
+                    lengths.push(slide_path::calculate_total_length(&pts));
+                    lanes.push(pts);
+                }
+                e.with_children(|p| {
+                    spawn_fan_children(p, &lanes, &lengths, has_head, head, layout, assets, color);
+                });
+                e.insert((path, FanLanes { lanes, lengths }));
+            } else {
+                e.with_children(|p| {
+                    spawn_slide_children(p, &path, has_head, head, layout, assets, color);
+                });
+                e.insert(path);
+            }
         }
     }
 }
@@ -297,7 +321,7 @@ fn spawn_slide_children(
         star_shape(assets, color),
         Transform::from_translation(start.extend(3.0)),
         Visibility::Hidden,
-        SlideElement::TraceStar,
+        SlideElement::TraceStar(0),
     ));
 
     // Chevron arrows spaced along the path, each rotated to face the travel
@@ -307,13 +331,84 @@ fn spawn_slide_children(
     while d < path.total_length {
         let (pos, angle) = slide_path::get_transform_at_distance(&path.waypoints, d);
         parent.spawn((
-            chevron_shape(assets, color.with_alpha(0.0)),
+            chevron_shape(
+                assets,
+                color.with_alpha(0.0),
+                NOTE_RADIUS,
+                0.5 * NOTE_RADIUS,
+            ),
             Transform::from_translation(pos.extend(1.0))
                 .with_rotation(Quat::from_rotation_z(angle)),
             SlideArrow {
                 distance_along_path: d,
+                lane: 0,
             },
         ));
         d += super::CHEVRON_SPACING;
+    }
+}
+
+/// Fan (`w`) variant: one head star plus, per lane, a trace star and a line of
+/// chevrons whose size grows with distance (small near the start, large near
+/// the end), all diverging to the three end buttons.
+#[allow(clippy::too_many_arguments)]
+fn spawn_fan_children(
+    parent: &mut RelatedSpawnerCommands<ChildOf>,
+    lanes: &[Vec<Vec2>],
+    lengths: &[f32],
+    has_head: bool,
+    head_button: usize,
+    layout: &ButtonLayout,
+    assets: &NoteAssets,
+    color: Color,
+) {
+    if has_head {
+        let pos = layout.tap_spawn[head_button - 1] * super::RADIUS;
+        parent.spawn((
+            star_shape(assets, color),
+            Transform::from_translation(pos.extend(2.0)).with_scale(Vec3::ZERO),
+            SlideElement::Head,
+        ));
+    }
+
+    // One trace star per lane (diverges to its end during Sliding).
+    for (idx, lane) in lanes.iter().enumerate() {
+        let start = lane.first().copied().unwrap_or(Vec2::ZERO);
+        parent.spawn((
+            star_shape(assets, color),
+            Transform::from_translation(start.extend(3.0)),
+            Visibility::Hidden,
+            SlideElement::TraceStar(idx),
+        ));
+    }
+
+    // A single widening column of chevrons along the central lane (→ e, the
+    // bisector of the two neighbours): each chevron is wider than the last so
+    // the column spreads into a cone. Chevrons consume against lane 0's length.
+    let central = &lanes[0];
+    let length = lengths[0];
+    let mut d = 1.5 * super::CHEVRON_SPACING;
+    let base_radius = NOTE_RADIUS;
+    let max_radius = 7.5 * NOTE_RADIUS;
+    while d < length {
+        let (pos, angle) = slide_path::get_transform_at_distance(central, d);
+        let f = d / length;
+        // x = forward (tip length), y = lateral (column width — grows strongly).
+
+        parent.spawn((
+            chevron_shape(
+                assets,
+                color.with_alpha(0.0),
+                base_radius + f * (max_radius - base_radius),
+                0.5 * NOTE_RADIUS,
+            ),
+            Transform::from_translation(pos.extend(1.0))
+                .with_rotation(Quat::from_rotation_z(angle)),
+            SlideArrow {
+                distance_along_path: d,
+                lane: 0,
+            },
+        ));
+        d += 1.5 * super::CHEVRON_SPACING;
     }
 }

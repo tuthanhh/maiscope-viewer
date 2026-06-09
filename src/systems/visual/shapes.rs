@@ -238,17 +238,24 @@ pub fn build_touch_hold_triangle_path(radius: f32) -> ShapePath {
 // Slide track — chevron arrow
 // ============================================================================
 
-/// Build the `ShapePath` for a slide track chevron arrow.
-pub fn build_chevron_path(radius: f32) -> ShapePath {
-    let width = 8.0 * radius / 25.0;
-    let height = 20.0 * radius / 25.0;
+pub fn build_chevron_path(radius: f32, thickness: f32) -> ShapePath {
+    let half_angle = 3.0 * PI / 8.0;
+
+    // Radius now strictly dictates how far the wings stretch
+    let depth = radius * half_angle.cos();
+    let height = radius * half_angle.sin();
+
+    // Thickness is absolutely fixed, centered on the origin
+    let inner_x = thickness / 2.0;
+    let outer_x = -thickness / 2.0;
+
     ShapePath::new()
-        .move_to(Vec2::new(-width, height))
-        .line_to(Vec2::new(0.0, 0.0))
-        .line_to(Vec2::new(-width, -height))
-        .line_to(Vec2::new(0.0, -height))
-        .line_to(Vec2::new(width, 0.0))
-        .line_to(Vec2::new(0.0, height))
+        .move_to(Vec2::new(-depth + inner_x, height))
+        .line_to(Vec2::new(inner_x, 0.0))
+        .line_to(Vec2::new(-depth + inner_x, -height))
+        .line_to(Vec2::new(-depth + outer_x, -height))
+        .line_to(Vec2::new(outer_x, 0.0))
+        .line_to(Vec2::new(-depth + outer_x, height))
         .close()
 }
 
@@ -291,7 +298,11 @@ pub fn build_spark_path(radius: f32) -> ShapePath {
             let ang = PI / 2.0 + i as f32 * PI / 5.0;
             let r = if i % 2 == 0 { star_r } else { star_r * 0.4 };
             let p = c + Vec2::new(r * ang.cos(), r * ang.sin());
-            path = if i == 0 { path.move_to(p) } else { path.line_to(p) };
+            path = if i == 0 {
+                path.move_to(p)
+            } else {
+                path.line_to(p)
+            };
         }
         path = path.close();
     }
@@ -388,8 +399,15 @@ pub(super) fn star_shape(assets: &NoteAssets, color: Color) -> Shape {
         .build()
 }
 
-pub(super) fn chevron_shape(assets: &NoteAssets, color: Color) -> Shape {
-    ShapeBuilder::with(&assets.chevron_path).fill(color).build()
+pub(super) fn chevron_shape(
+    assets: &NoteAssets,
+    color: Color,
+    radius: f32,
+    thickness: f32,
+) -> Shape {
+    ShapeBuilder::with(&(assets.chevron_path)(radius, thickness))
+        .fill(color)
+        .build()
 }
 
 pub(super) fn hexagon_shape(assets: &NoteAssets, color: Color) -> Shape {

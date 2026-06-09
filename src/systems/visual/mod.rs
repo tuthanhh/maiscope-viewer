@@ -13,7 +13,7 @@ pub use spawning::next_event;
 const RADIUS: f32 = 350.0;
 const NOTE_RADIUS: f32 = 35.0;
 /// Spacing between chevron arrows along a slide track. Tune visually.
-const CHEVRON_SPACING: f32 = NOTE_RADIUS * 0.75;
+const CHEVRON_SPACING: f32 = NOTE_RADIUS * 1.0;
 /// Radius of the TouchHold countdown ring (single source of truth).
 const COUNTDOWN_RADIUS: f32 = NOTE_RADIUS * 1.15;
 

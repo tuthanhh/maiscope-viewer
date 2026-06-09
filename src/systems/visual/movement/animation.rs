@@ -10,7 +10,7 @@ use crate::systems::{
     component::{Duration, NoteKind},
     visual::{
         NOTE_RADIUS, RADIUS,
-        component::{HoldNoteElement, SlideElement, SlidePath, TouchElement},
+        component::{FanLanes, HoldNoteElement, SlideElement, SlidePath, TouchElement},
         note_colors,
         resources::ButtonLayout,
         shapes, slide_path,
@@ -278,9 +278,10 @@ pub(super) fn wait_slide(
 ) {
     let Some(children) = children else { return };
     for child in children.iter() {
-        if let Ok((_t, el, mut vis, mut shape)) = slide_elements.get_mut(child) {
-            if matches!(*el, SlideElement::TraceStar) {
+        if let Ok((mut transform, el, mut vis, mut shape)) = slide_elements.get_mut(child) {
+            if matches!(*el, SlideElement::TraceStar(_)) {
                 *vis = Visibility::Visible;
+                transform.scale = Vec3::splat(t);
                 set_alpha(&mut shape, t);
             }
         }
@@ -298,17 +299,48 @@ pub(super) fn slide_trace(
 ) {
     let Some(children) = children else { return };
     let dist = slide_path::trace_distance(path, elapsed);
-    let (pos, _angle) = slide_path::get_transform_at_distance(&path.waypoints, dist);
+    let (pos, angle) = slide_path::get_transform_at_distance(&path.waypoints, dist);
     for child in children.iter() {
-        if let Ok((mut transform, el, mut vis, mut shape)) = slide_elements.get_mut(child) {
-            if matches!(*el, SlideElement::TraceStar) {
-                *vis = Visibility::Visible;
+        if let Ok((mut transform, el, _vis, mut shape)) = slide_elements.get_mut(child) {
+            if matches!(*el, SlideElement::TraceStar(_)) {
                 set_alpha(&mut shape, 1.0);
                 transform.translation = pos.extend(3.0);
+                transform.rotation = Quat::from_rotation_z(angle);
             }
         }
         if let Ok((_s, arrow)) = slide_arrows.get_mut(child) {
             if arrow.distance_along_path <= dist {
+                commands.entity(child).despawn();
+            }
+        }
+    }
+}
+
+/// Fan Sliding phase: each lane's trace star walks its own lane at the shared
+/// progress fraction; chevrons are removed as their lane's star passes them.
+pub(super) fn fan_trace(
+    frac: f32,
+    fan: &FanLanes,
+    children: Option<&Children>,
+    slide_elements: &mut SlideElementQuery,
+    slide_arrows: &mut SlideArrowQuery,
+    commands: &mut Commands,
+) {
+    let Some(children) = children else { return };
+    for child in children.iter() {
+        if let Ok((mut transform, el, _vis, mut shape)) = slide_elements.get_mut(child) {
+            if let SlideElement::TraceStar(lane) = *el {
+                let len = fan.lengths.get(lane).copied().unwrap_or(0.0);
+                let (pos, angle) =
+                    slide_path::get_transform_at_distance(&fan.lanes[lane], frac * len);
+                set_alpha(&mut shape, 1.0);
+                transform.translation = pos.extend(3.0);
+                transform.rotation = Quat::from_rotation_z(angle);
+            }
+        }
+        if let Ok((_s, arrow)) = slide_arrows.get_mut(child) {
+            let len = fan.lengths.get(arrow.lane).copied().unwrap_or(0.0);
+            if arrow.distance_along_path <= frac * len {
                 commands.entity(child).despawn();
             }
         }

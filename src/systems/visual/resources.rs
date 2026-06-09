@@ -79,7 +79,7 @@ pub struct NoteAssets {
     pub touch_hold_triangle_path: ShapePath,
 
     /// Slide track chevron arrow (closed polygon, stroked).
-    pub chevron_path: ShapePath,
+    pub chevron_path: fn(f32, f32) -> ShapePath,
 
     /// TouchHold countdown square (full perimeter placeholder; redrawn at runtime).
     pub countdown_arc_path: ShapePath,
@@ -105,7 +105,7 @@ impl Default for NoteAssets {
             touch_circle_path: shapes::build_touch_circle_path(radius),
             touch_triangle_path: shapes::build_touch_triangle_path(radius),
             touch_hold_triangle_path: shapes::build_touch_hold_triangle_path(radius),
-            chevron_path: shapes::build_chevron_path(radius),
+            chevron_path: shapes::build_chevron_path,
             countdown_arc_path: shapes::build_countdown_path(super::COUNTDOWN_RADIUS, 1.0),
             hexagon_path: shapes::build_hexagon_path(radius * 0.75),
             hold_halo_path: shapes::build_hold_halo_path(radius * 0.75),

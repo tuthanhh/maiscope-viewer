@@ -9,8 +9,8 @@ use crate::systems::{
     component::NoteKind,
     visual::{
         component::{
-            HoldHalo, HoldNoteElement, NoteBpm, SlideArrow, SlideElement, SlidePath, TouchElement,
-            TouchHoldCountdown,
+            FanLanes, HoldHalo, HoldNoteElement, NoteBpm, SlideArrow, SlideElement, SlidePath,
+            TouchElement, TouchHoldCountdown,
         },
         note_colors,
         shapes::{hexagon_shape, hold_halo_shape, spark_shape},
@@ -21,6 +21,7 @@ use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::*;
 
 mod animation;
+use crate::systems::audio::PlayGuideSoundMessage;
 use animation::*;
 
 type TriangleQuery<'w, 's> = Query<
@@ -121,6 +122,7 @@ pub fn update_movement(
         Option<&Children>,
         Option<&NoteBpm>,
         Option<&SlidePath>,
+        Option<&FanLanes>,
     )>,
     mut triangles: TriangleQuery,
     mut hold_elements: HoldElementQuery,
@@ -132,6 +134,8 @@ pub fn update_movement(
     layout: Res<ButtonLayout>,
     time: Res<Time>,
     assets: Res<NoteAssets>,
+
+    mut guide_sound_messages: MessageWriter<PlayGuideSoundMessage>,
 ) {
     let speed = chart.chart_speed * chart.note_speed;
     let move_duration = MOVING as f32 / speed;
@@ -146,6 +150,7 @@ pub fn update_movement(
         children,
         note_bpm,
         slide_path_data,
+        fan_lanes,
     ) in entity_query.iter_mut()
     {
         match &mut *timing {
@@ -197,6 +202,8 @@ pub fn update_movement(
                                     duration_to_secs(*duration, *bpm),
                                     TimerMode::Once,
                                 ));
+
+                                guide_sound_messages.write(PlayGuideSoundMessage);
                             }
                         }
                         NoteKind::Slide { .. } | NoteKind::HeadlessSlide { .. } => {
@@ -267,7 +274,16 @@ pub fn update_movement(
             NoteTiming::Sliding(timer) => {
                 timer.tick(time.delta());
                 let elapsed = timer.elapsed_secs();
-                if let Some(path) = slide_path_data {
+                if let Some(fan) = fan_lanes {
+                    fan_trace(
+                        timer.fraction(),
+                        fan,
+                        children,
+                        &mut slide_elements,
+                        &mut slide_arrows,
+                        &mut commands,
+                    );
+                } else if let Some(path) = slide_path_data {
                     slide_trace(
                         elapsed,
                         path,
@@ -286,6 +302,7 @@ pub fn update_movement(
             NoteTiming::Dying(timer) => {
                 // On the very first frame: transform into a hexagon
                 if timer.elapsed().is_zero() && !is_slide(kind) {
+                    guide_sound_messages.write(PlayGuideSoundMessage);
                     // Despawn all children (slide stars, hold bodies, touch triangles)
                     // so we only see the hexagon effect
                     if let Some(children) = children {
